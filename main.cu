@@ -876,12 +876,12 @@ int main(int argc, char* argv[])
                    
 
 
-					//advect
+					//advect part
 					Advect_gpu_u <<<blks,grid >>> (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_next, GPU_Data->uy_next, GPU_Data->ux_half, GPU_Data->uy_half,fluid.simulator_GPU->timeStep, nw, nh);
                     cudaDeviceSynchronize();
-                    AdvanceTime << <blks,grid >> > (GPU_Data->ux_, GPU_Data->ux_next,nw,nh);
+                    AdvanceTime <<<blks,grid >> > (GPU_Data->ux_, GPU_Data->ux_next,nw,nh);
 					cudaDeviceSynchronize();
-                    AdvanceTime << <blks,grid >> > (GPU_Data->uy_, GPU_Data->uy_next,nw,nh);
+                    AdvanceTime <<<blks,grid >> > (GPU_Data->uy_, GPU_Data->uy_next,nw,nh);
 					cudaDeviceSynchronize();
 
 			
@@ -962,15 +962,6 @@ int main(int argc, char* argv[])
 					AdvanceTime << <blks,grid >> > (GPU_Data->density_, GPU_Data->density_next, nw, nh);
 					cudaDeviceSynchronize();
 
-
-					//FVM density
-					//for (size_t i = 0; i < iterTime; i++)
-					//{
-						//FVM_Density_gpu << <blks, grid >> > (GPU_Data->density_, GPU_Data->density_next, GPU_Data->ux_, GPU_Data->uy_, fluid.simulator_GPU->timeStep, nw, nh);
-						//cudaDeviceSynchronize();
-					//}
-					//AdvanceTime << <blks,grid >> > (GPU_Data->density_, GPU_Data->density_next, nw, nh);
-					//cudaDeviceSynchronize();
 
 
 					
