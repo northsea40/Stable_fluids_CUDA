@@ -39,7 +39,7 @@ public:
 	int nw_;
 	int nh_;
 	const int m_num;
-	double timeStep=2.0;
+	double timeStep=1.0;
 	double dx = 1.0f;
 	double viscosity = 0.0001;
 	double diffk = 0.0001;

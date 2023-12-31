@@ -27,6 +27,7 @@ __device__ double Clamp(double x, double min, double max)
 	return ret;
 }
 
+//For advect part
 __device__ double Interpolation(double x, double y, double* u, unsigned nw_)
 {
 	int x_ceil = ceilf(x);
@@ -44,6 +45,7 @@ __device__ double Interpolation(double x, double y, double* u, unsigned nw_)
 	return s0 * (t0 * u[left_down_idx] + t1 * u[left_up_idx]) + s1 * (t0 * u[right_down_idx] + t1 * u[right_up_idx]);
 }
 
+//Set specific value for boundary
 __device__ void Set_boundary(double* u,int x,int y,int nw_,int nh_)
 {
 	if (x == 0 && y == 0) 
@@ -89,10 +91,16 @@ __device__ void Set_boundary(double* u,int x,int y,int nw_,int nh_)
 }
 	
 
+//For out of index fetch,use itself value
+__device__ double Safe_fetch(double* u, int x, int y, int nw_, int nh_) 
+{
+	double safeIndex_x = Clamp(x, 0, nw_-1);
+	double safeIndex_y = Clamp(y, 0, nh_-1);
+	return u[IX(safeIndex_x, safeIndex_y, nw_)];
+}
+
 __global__ void AdvanceTime(double* oldarray, double* newarray, int nw_, int nh_)
 {
-	/*int tid = threadIdx.x + blockIdx.x * blockDim.x;
-	if (tid >= nw_ * nh_) return;*/
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
@@ -100,11 +108,9 @@ __global__ void AdvanceTime(double* oldarray, double* newarray, int nw_, int nh_
 	oldarray[IX(x, y, nw_)] = newarray[IX(x, y, nw_)];
 }
 
+//Set value to 0
 __global__ void SetValue(double* input, double number, int nw_, int nh_) 
 {
-	/*int tid = threadIdx.x + blockIdx.x * blockDim.x;
-	if (tid >= nw_ * nh_) return;*/
-
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
@@ -113,342 +119,53 @@ __global__ void SetValue(double* input, double number, int nw_, int nh_)
 
 
 
-__device__ void  lin_solve_gpu(int b, double* x, double* x0, double a, double c, int iter, int N, int tid)
-{
-	//int localID = threadIdx.x;
-	//int i = tid % N;
-	//int j = tid / N;
-
-	//__shared__ double local_x[NUM_THREADS];
-
-	//if (i < 1 || i > N - 2) return;
-	//if (j < 1 || j > N - 2) return;
-
-	//double cRecip = 1.0 / c;
-	//for (int k = 0; k < iter; k++) 
-	//{
-	//	local_x[localID] =
-	//		(x0[IX(i, j)]
-	//			+ a * (x[IX(i + 1, j)]
-	//				+ x[IX(i - 1, j)]
-	//				+ x[IX(i, j + 1)]
-	//				+ x[IX(i, j - 1)]
-	//				)) * cRecip;
-
-	//	__syncthreads();
-
-	//	x[IX(i, j)] = local_x[localID];
-
-	//	//__syncthreads();
-
-	//	set_bnd_gpu(b, x, N, tid);
-
-	//}
-}
-
 __global__ void diffuse_gpu(double* ux_, double* ux_next,double viscosity , int nw_,int nh_)
 {
-	/*int tid = threadIdx.x + blockIdx.x * blockDim.x;
-	int localid = threadIdx.x;
-	if (tid >= nw_ * nh_) return;
-	int x = tid % nw_;
-	int y = tid / nw_;*/
 
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
-
-	//if (x < 1 || x > nw_ - 2) 
-	//{
-	//	Set_boundary(ux_next, x, y, nw_, nh_);
-	//	return;
-	//} 
-	//if (y < 1 || y > nh_ - 2) 
-	//{
-	//	Set_boundary(ux_next, x, y, nw_, nh_);
-	//	return;
-	//}
-	/*if (IX(x-1, y, nw_) < 0 || IX(x-1, y, nw_) > 64 * 64 - 1) 
-	{
-		printf("fail:%d \n", IX(x - 1, y, nw_));
-		printf("x:%d \n", x);
-		printf("y:%d \n", y);
-	}
-	if (IX(x+1, y, nw_) < 0 || IX(x+1, y, nw_) > 64 * 64 - 1)
-	{
-		printf("fail:%d \n", IX(x + 1, y, nw_));
-		printf("x:%d \n", x);
-		printf("y:%d \n", y);
-	}
-	if (IX(x, y-1, nw_) < 0 || IX(x, y-1, nw_) > 64 * 64 - 1)
-	{
-		printf("fail:%d \n", IX(x, y-1, nw_));
-		printf("x:%d \n", x);
-		printf("y:%d \n", y);
-	}
-	if (IX(x, y+1, nw_) < 0 || IX(x, y+1, nw_) > 64 * 64 - 1)
-	{
-		printf("fail:%d \n", IX(x, y+1, nw_));
-		printf("x:%d \n", x);
-		printf("y:%d \n", y);
-	}*/
-	double uxpre;
-	double uypre;
-	double uxnext;
-	double uynext;
-	if (x < 1)
-	{
-		uxpre = ux_next[IX(x, y, nw_)];
-	}
-	else
-	{
-		uxpre = ux_next[IX(x - 1, y, nw_)];
-	}
-
-	if (y < 1)
-	{
-		uypre = ux_next[IX(x, y, nw_)];
-	}
-	else
-	{
-		uypre = ux_next[IX(x, y - 1, nw_)];
-	}
-
-	if (x > nh_ - 2)
-	{
-		uxnext = ux_next[IX(x, y, nw_)];
-	}
-	else
-	{
-		uxnext = ux_next[IX(x + 1, y, nw_)];
-	}
-	if (y > nh_ - 2)
-	{
-		uynext = ux_next[IX(x, y, nw_)];
-	}
-	else
-	{
-		uynext = ux_next[IX(x, y + 1, nw_)];
-	}
-
-
+	double uxpre = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
+	double uxnext = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
+	double uypre = Safe_fetch(ux_next, x, y-1, nw_, nh_);
+	double uynext = Safe_fetch(ux_next, x, y+1, nw_, nh_);
 	ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre+ uxnext + uypre+ uynext)) / (1.0f + 4.0f * viscosity);
-	
-	/*for (size_t i = 0; i < 100; i++)
-	{
-		if ((x + y) % 2 == 0) 
-		{
-			ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (ux_next[IX(x - 1, y, nw_)] + ux_next[IX(x + 1, y, nw_)] + ux_next[IX(x, y - 1, nw_)] + ux_next[IX(x, y + 1, nw_)])) / (1.0f + 4.0f * viscosity);
-		}
-		__syncthreads();
-		if ((x + y) % 2 != 0)
-		{
-			ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (ux_next[IX(x - 1, y, nw_)] + ux_next[IX(x + 1, y, nw_)] + ux_next[IX(x, y - 1, nw_)] + ux_next[IX(x, y + 1, nw_)])) / (1.0f + 4.0f * viscosity);
-		}
-	}*/
-	
 }
 
 
 __global__ void ComputePressure_gpu(double* ux_, double* uy_, double* pressure, int nw_, int nh_) 
 {
-	//int tid = threadIdx.x + blockIdx.x * blockDim.x;
-	//if (tid >= nw_ * nh_) return;
-
-	//int x = tid % nw_;
-	//int y = tid / nw_;
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
-
-	/*if (x < 1 || x > nw_ - 2)
-	{
-		Set_boundary(ux_, x, y, nw_, nh_);
-		return;
-	}
-	if (y < 1 || y > nh_ - 2)
-	{
-		Set_boundary(ux_, x, y, nw_, nh_);
-		return;
-	}*/
 	double diverg = 0.0f;
-	//__shared__ double pressure[NUM_THREADS];
-	/*double ux_pre = ux_[IX(x - 1, y, nw_)];
-	double uy_pre = uy_[IX(x, y - 1, nw_)];
-	double ux_next = ux_[IX(x + 1, y, nw_)];
-	double uy_next = uy_[IX(x, y + 1, nw_)];*/
-
-	double uxpre;
-	double uypre;
-	double uxnext;
-	double uynext;
-	if (x < 1)
-	{
-		uxpre = ux_[IX(x, y, nw_)];
-	}
-	else
-	{
-		uxpre = ux_[IX(x - 1, y, nw_)];
-	}
-
-	if (y < 1)
-	{
-		uypre = uy_[IX(x, y, nw_)];
-	}
-	else
-	{
-		uypre = uy_[IX(x, y - 1, nw_)];
-	}
-
-	if (x > nh_ - 2)
-	{
-		uxnext = ux_[IX(x, y, nw_)];
-	}
-	else
-	{
-		uxnext = ux_[IX(x + 1, y, nw_)];
-	}
-	if (y > nh_ - 2)
-	{
-		uynext = uy_[IX(x, y, nw_)];
-	}
-	else
-	{
-		uynext = uy_[IX(x, y + 1, nw_)];
-	}
-
-
-
-
+	double uxpre = Safe_fetch(ux_, x - 1, y, nw_, nh_);
+	double uxnext = Safe_fetch(ux_, x + 1, y, nw_, nh_);
+	double uypre = Safe_fetch(uy_, x , y-1, nw_, nh_);
+	double uynext = Safe_fetch(uy_, x , y+1, nw_, nh_);
 	diverg = -0.5f * (uxnext - uxpre + uynext - uypre);
 	
 
-
-	double pressurex_pre;
-	double pressurey_pre;
-	double pressurex_next;
-	double pressurey_next;
-	if (x < 1) 
-	{
-		pressurex_pre = pressure[IX(x, y, nw_)];
-	}
-	else
-	{
-		pressurex_pre = pressure[IX(x-1, y, nw_)];
-	}
-
-	if (y < 1)
-	{
-		pressurey_pre = pressure[IX(x, y, nw_)];
-	}
-	else
-	{
-		pressurey_pre = pressure[IX(x , y-1, nw_)];
-	}
-
-	if (x > nh_ - 2)
-	{
-		pressurex_next = pressure[IX(x, y, nw_)];
-	}
-	else
-	{
-		pressurex_next = pressure[IX(x +1, y, nw_)];
-	}
-	if (y > nh_ - 2)
-	{
-		pressurey_next = pressure[IX(x, y, nw_)];
-	}
-	else
-	{
-		pressurey_next = pressure[IX(x, y+1, nw_)];
-	}
-	//double pressurex_pre = pressure[IX(x - 1, y, nw_)];
-	//double pressurey_pre = pressure[IX(x, y - 1, nw_)];
-	//double pressurex_next = pressure[IX(x + 1, y, nw_)];
-	//double pressurey_next = pressure[IX(x, y + 1, nw_)];
+	double pressurex_pre = Safe_fetch(pressure, x - 1, y, nw_, nh_);
+	double pressurex_next = Safe_fetch(pressure, x + 1, y, nw_, nh_);
+	double pressurey_pre = Safe_fetch(pressure, x, y+1, nw_, nh_);
+	double pressurey_next = Safe_fetch(pressure, x, y-1, nw_, nh_);
 	pressure[IX(x, y, nw_)] = (diverg + pressurex_pre + pressurex_next + pressurey_next + pressurey_pre) / 4.0f;
 	
-	//for (size_t i = 0; i < 100; i++)
-	//{
-	//	if ((x + y) % 2 == 0)
-	//	{
-	//		pressure[IX(x, y, nw_)] = (diverg + pressurex_pre + pressurex_next + pressurey_next + pressurey_pre) / 4.0f;
-	//	}
-	//	__syncthreads();
-	//	if ((x + y) % 2 != 0)
-	//	{
-	//		pressure[IX(x, y, nw_)] = (diverg + pressurex_pre + pressurex_next + pressurey_next + pressurey_pre) / 4.0f;
-	//	}
-	//}
 }
 
 __global__ void Projection_gpu(double* ux_, double* uy_, double* pressure, int nw_, int nh_) 
 {
-	//int tid = threadIdx.x + blockIdx.x * blockDim.x;
-	//if (tid >= nw_ * nh_) return;
-
-	//int x = tid % nw_;
-	//int y = tid / nw_;
 
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
-
-	/*if (x < 1 || x > nw_ - 2)
-	{
-		Set_boundary(ux_, x, y, nw_, nh_);
-		Set_boundary(uy_, x, y, nw_, nh_);
-		return;
-	}
-	if (y < 1 || y > nh_ - 2)
-	{
-		Set_boundary(ux_, x, y, nw_, nh_);
-		Set_boundary(uy_, x, y, nw_, nh_);
-		return;
-	}*/
 	
-	/*double pressurex_pre = pressure[IX(x - 1, y, nw_)];
-	double pressurey_pre = pressure[IX(x, y - 1, nw_)];
-	double pressurex_next = pressure[IX(x + 1, y, nw_)];
-	double pressurey_next = pressure[IX(x, y + 1, nw_)];*/
-	double pressurex_pre;
-	double pressurey_pre;
-	double pressurex_next;
-	double pressurey_next;
-	if (x < 1)
-	{
-		pressurex_pre = pressure[IX(x, y, nw_)];
-	}
-	else
-	{
-		pressurex_pre = pressure[IX(x - 1, y, nw_)];
-	}
+	double pressurex_pre = Safe_fetch(pressure, x - 1, y, nw_, nh_);
+	double pressurex_next = Safe_fetch(pressure, x + 1, y, nw_, nh_);
+	double pressurey_pre = Safe_fetch(pressure, x , y-1, nw_, nh_);
+	double pressurey_next = Safe_fetch(pressure, x, y+1, nw_, nh_);
 
-	if (y < 1)
-	{
-		pressurey_pre = pressure[IX(x, y, nw_)];
-	}
-	else
-	{
-		pressurey_pre = pressure[IX(x, y - 1, nw_)];
-	}
-
-	if (x > nh_ - 2)
-	{
-		pressurex_next = pressure[IX(x, y, nw_)];
-	}
-	else
-	{
-		pressurex_next = pressure[IX(x + 1, y, nw_)];
-	}
-	if (y > nh_ - 2)
-	{
-		pressurey_next = pressure[IX(x, y, nw_)];
-	}
-	else
-	{
-		pressurey_next = pressure[IX(x, y + 1, nw_)];
-	}
 	ux_[IX(x, y,nw_)] -= 0.5f * (pressurex_next - pressurex_pre);
 	uy_[IX(x, y,nw_)] -= 0.5f * (pressurey_next - pressurey_pre);
 
@@ -458,15 +175,11 @@ __global__ void Projection_gpu(double* ux_, double* uy_, double* pressure, int n
 
 __global__ void Advect_gpu_u(double* ux_, double* uy_, double* ux_next, double* uy_next, double* ux_half,double* uy_half ,double timestep, int nw_, int nh_)
 {
-	/*int tid = threadIdx.x + blockIdx.x * blockDim.x;
-	if (tid >= nw_ * nh_) return;
-
-	int x = tid % nw_;
-	int y = tid / nw_;*/
 
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y>=nh_) return;
+	//TODO need check!
 	if (x < 1 || x > nw_ - 2)
 	{
 		Set_boundary(ux_next, x, y, nw_, nh_);
@@ -479,58 +192,42 @@ __global__ void Advect_gpu_u(double* ux_, double* uy_, double* ux_next, double* 
 		Set_boundary(uy_next, x, y, nw_, nh_);
 		return;
 	}
+	double xPosPrev = x - timestep * ux_[IX(x, y, nw_)];
+	double yPosPrev = y - timestep * uy_[IX(x, y, nw_)];
 
-
-	double xPosPrev = x - 0.5f*timestep * ux_[IX(x, y, nw_)];
-	double yPosPrev = y - 0.5f*timestep * uy_[IX(x, y, nw_)];
+	//for for advanced part
+	//double xPosPrev = x - 0.5f*timestep * ux_[IX(x, y, nw_)];
+	//double yPosPrev = y - 0.5f*timestep * uy_[IX(x, y, nw_)];
 	xPosPrev = Clamp(xPosPrev, 0.0f, double(nw_));
 	yPosPrev = Clamp(yPosPrev, 0.0f, double(nh_));
-	//may be not ux_??
 	double ux_advected = Interpolation(xPosPrev, yPosPrev, ux_, nw_);
 	double uy_advected = Interpolation(xPosPrev, yPosPrev, uy_, nw_);
-	//test interpolatation	 
-	//add to ux uy
 	ux_next[IX(x, y, nw_)] = ux_advected;
 	uy_next[IX(x, y, nw_)] = uy_advected;
+
+	//not need to pay attention,for advanced part
 	ux_half[IX(x, y, nw_)] = ux_advected;
 	uy_half[IX(x, y, nw_)] = uy_advected;
-	//ux_half[idx(x, y)] = ux_advected;
-	//uy_half[idx(x, y)] = uy_advected;
 
 }
 
 
-
+//For advanced part need reflection
 __global__ void Refelect_gpu_u(double* ux_, double* uy_, double* ux_half, double* uy_half,double timestep, int nw_, int nh_)
 {
-	/*int tid = threadIdx.x + blockIdx.x * blockDim.x;
-	if (tid >= nw_ * nh_) return;
-
-	int x = tid % nw_;
-	int y = tid / nw_;*/
-
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
 
-	if (x < 1 || x > nw_ - 2||y < 1 || y > nh_ - 2)
-	{
-		Set_boundary(ux_, x, y, nw_, nh_);
-		Set_boundary(uy_, x, y, nw_, nh_);
-		return;
-	}
 	ux_[IX(x, y, nw_)] = 2 * ux_[IX(x, y, nw_)] - ux_half[IX(x, y, nw_)];
 	uy_[IX(x, y, nw_)] = 2 * uy_[IX(x, y, nw_)] - uy_half[IX(x, y, nw_)];
 
 }
 
+
+//density advection
 __global__ void Advect_gpu_density(double* density_, double* density_next, double* ux_, double* uy_, double* ux_next, double* uy_next, double timestep, int nw_, int nh_)
 {
-	/*int tid = threadIdx.x + blockIdx.x * blockDim.x;
-	if (tid >= nw_ * nh_) return;
-
-	int x = tid % nw_;
-	int y = tid / nw_;*/
 
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -550,88 +247,8 @@ __global__ void Advect_gpu_density(double* density_, double* density_next, doubl
 	density_next[IX(x, y, nw_)] = density_advected;
 }
 
-__global__ void FVM_Density_gpu(double* density_,double* density_next, double* ux_, double* uy_, double timestep, int nw_, int nh_) 
-{
-	int x = threadIdx.x + blockIdx.x * blockDim.x;
-	int y = threadIdx.y + blockIdx.y * blockDim.y;
-	if (x >= nw_ || y >= nh_) return;
 
-	if (x < 1 || x > nw_ - 2 || y < 1 || y > nh_ - 2)
-	{
-		//Set_boundary(density_next, x, y, nw_, nh_);
-		return;
-	}
-	//double ux_leftup =0.25*ux_[IX(x-1, y+1, nw_)]+ 0.25 * ux_[IX(x - 1, y, nw_)]+ 0.25 * ux_[IX(x, y-1, nw_)]+ 0.25 * ux_[IX(x, y, nw_)];
-	//double ux_rightup = 0.25 * ux_[IX(x + 1, y, nw_)] + 0.25 * ux_[IX(x, y-1, nw_)] + 0.25 * ux_[IX(x+1, y - 1, nw_)] + 0.25 * ux_[IX(x, y, nw_)];
-	//double ux_leftdown = 0.25 * ux_[IX(x - 1, y, nw_)] + 0.25 * ux_[IX(x, y+1, nw_)] + 0.25 * ux_[IX(x-1, y + 1, nw_)] + 0.25 * ux_[IX(x, y, nw_)];
-	//double ux_rightdown = 0.25 * ux_[IX(x + 1, y , nw_)] + 0.25 * ux_[IX(x, y+1, nw_)] + 0.25 * ux_[IX(x+1, y + 1, nw_)] + 0.25 * ux_[IX(x, y, nw_)];
-
-
-	//double uy_leftup = 0.25 * uy_[IX(x - 1, y - 1, nw_)] + 0.25 * uy_[IX(x - 1, y, nw_)] + 0.25 * uy_[IX(x, y - 1, nw_)] + 0.25 * uy_[IX(x, y, nw_)];
-	//double uy_rightup = 0.25 * uy_[IX(x + 1, y, nw_)] + 0.25 * uy_[IX(x, y - 1, nw_)] + 0.25 * uy_[IX(x + 1, y - 1, nw_)] + 0.25 * uy_[IX(x, y, nw_)];
-	//double uy_leftdown = 0.25 * uy_[IX(x - 1, y, nw_)] + 0.25 * uy_[IX(x, y + 1, nw_)] + 0.25 * uy_[IX(x - 1, y + 1, nw_)] + 0.25 * uy_[IX(x, y, nw_)];
-	//double uy_rightdown = 0.25 * uy_[IX(x + 1, y, nw_)] + 0.25 * uy_[IX(x, y + 1, nw_)] + 0.25 * uy_[IX(x + 1, y + 1, nw_)] + 0.25 * uy_[IX(x, y, nw_)];
-
-
-	double ux_left = 0.5 * ux_[IX(x - 1, y, nw_)] + 0.5 * ux_[IX(x, y, nw_)];
-	double ux_right = 0.5 * ux_[IX(x + 1, y, nw_)] + 0.5 * ux_[IX(x, y, nw_)];
-	double uy_down = 0.5 * uy_[IX(x, y-1, nw_)] + 0.5 * uy_[IX(x, y, nw_)];
-	double uy_up = 0.5 * uy_[IX(x, y+1, nw_)] + 0.5 * uy_[IX(x, y, nw_)];
-
-	//double left_mom = ux_[IX(x - 1, y, nw_)] * density_[IX(x - 1, y, nw_)];
-	//double right_mom = ux_[IX(x + 1, y, nw_)] * density_[IX(x + 1, y, nw_)];
-	//double up_mom = uy_[IX(x, y + 1, nw_)] * density_[IX(x, y + 1, nw_)];
-	//double down_mom = uy_[IX(x, y-1, nw_)] * density_[IX(x, y - 1, nw_)];
-	//double current_mom_x = ux_[IX(x, y, nw_)] * density_[IX(x, y, nw_)];
-	//double current_mom_y = uy_[IX(x, y, nw_)] * density_[IX(x, y, nw_)];
-
-	//density_[IX(x, y, nw_)] -= (0.5 * (ux_rightup + ux_rightdown) + (-0.5 * (ux_leftup + ux_leftdown))+ (0.5 * (uy_leftup + uy_rightup)) + (-0.5 * (uy_leftdown + uy_rightdown)))*timestep;
-	double density_left = 0.5 * density_[IX(x - 1, y, nw_)] + 0.5 * density_[IX(x, y, nw_)];
-	double density_right = 0.5 * density_[IX(x + 1, y, nw_)] + 0.5 * density_[IX(x, y, nw_)];
-	double density_down = 0.5 * density_[IX(x, y - 1, nw_)] + 0.5 * density_[IX(x, y, nw_)];
-	double density_up = 0.5 * density_[IX(x, y+1, nw_)] + 0.5 * density_[IX(x, y, nw_)];
-
-	//double wavespeed = 0;
-	//double dissipation_left =0.5* wavespeed * (density_[IX(x - 1, y, nw_)] - density_[IX(x, y, nw_)]);
-	//double dissipation_right =0.5* wavespeed * (density_[IX(x + 1, y, nw_)] - density_[IX(x, y, nw_)]);
-	//double dissipation_down =0.5* wavespeed * (density_[IX(x, y-1, nw_)] - density_[IX(x, y, nw_)]);
-	//double dissipation_up =0.5* wavespeed * (density_[IX(x, y+1, nw_)] - density_[IX(x, y, nw_)]);
-
-	
-	//compute momentum and then average
-	//double left_term = 0.5*(left_mom+current_mom_x) + dissipation_left;
-	//double right_term = 0.5 * (right_mom + current_mom_x) + dissipation_right;
-	//double up_term = 0.5 * (up_mom + current_mom_y) + dissipation_up;
-	//double down_term = 0.5 * (down_mom + current_mom_y) + dissipation_down;
-
-	//average speed and density then compute momentum
-	double left_term = ux_left * density_left ;
-	double right_term = ux_right * density_right;
-	double up_term = uy_up * density_up  ;
-	double down_term = uy_down * density_down ;
-	double origin_denisty = density_[IX(x, y, nw_)];
-
-	density_next[IX(x, y, nw_)] =origin_denisty-(right_term-left_term+up_term-down_term) * timestep;
-	/*if (density_next[IX(x, y, nw_)] < -0.1) 
-	{
-		printf("current x:%d current y:%d\n", x, y);
-		printf("right vel:%f left vel:%f\n", ux_right, ux_left);
-		printf("up vel:%f down vel:%f\n", uy_up, uy_down);
-		printf("right density:%f left density:%f\n", density_right, density_left);
-		printf("up density:%f down density:%f\n", density_up, density_down);
-
-	}*/
-
-	//using chain rule
-	//density_next[IX(x, y, nw_)] = origin_denisty - ((density_right-density_left)*ux_right+(ux_right-ux_left)*density_right+ (density_up - density_down) * uy_up + (uy_up - uy_down) * density_up) * timestep;
-	
-	//density_next[IX(x, y, nw_)] = origin_denisty - (0.5 * (right_mom + current_mom_x) + 0.5 * (left_mom + current_mom_x) + 0.5 * (up_mom + current_mom_y) + 0.5 * (down_mom + current_mom_y));
-	//density_[IX(x, y, nw_)] -=
-
-
-}
-
-
+//For Debug
 __global__ void Check_gpu(double* density_, double* density_next, double* ux_, double* uy_, double timestep, int nw_, int nh_)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -646,6 +263,11 @@ __global__ void Check_gpu(double* density_, double* density_next, double* ux_, d
 
 
 }
+
+
+//CPU part
+#pragma region CPU Fuctions
+
 
 unsigned idx(unsigned x, unsigned y, unsigned nw_)
 {
@@ -669,7 +291,6 @@ double Clamp_cpu(double x, double min, double max)
 	return ret;
 }
 
-
 double Interpolation_cpu(double x, double y, double* u, unsigned nw_)
 {
 	int x_ceil = ceilf(x);
@@ -686,8 +307,6 @@ double Interpolation_cpu(double x, double y, double* u, unsigned nw_)
 	double s0 = 1 - s1;
 	return s0 * (t0 * u[left_down_idx] + t1 * u[left_up_idx]) + s1 * (t0 * u[right_down_idx] + t1 * u[right_up_idx]);
 }
-
-
 
 void diffuse_cpu(double* ux_, double* ux_next, double viscosity, int nw_, int nh_)
 {
@@ -749,7 +368,7 @@ void advect_density_cpu(double* ux_, double* uy_, double* density_, double* dens
 
 }
 
-
+#pragma endregion
 
 
 
@@ -807,15 +426,10 @@ int main(int argc, char* argv[])
 
     // Main Loop
     {
-        /**** Initiate Objects Here ****/
         Shader shader("fluid.vs", "fluid.fs");
 
         FluidScene fluid {1000, 1000};
         FluidVisualizer renderer {&shader, &fluid};
-
-        { // Initialize here
-            //fluid.setCircleAtCenter();
-        }
 
         int curKeyState = GLFW_RELEASE;
         int lastKeyState = GLFW_RELEASE;
@@ -824,10 +438,8 @@ int main(int argc, char* argv[])
 		FluidData* CPU_Data = fluid.simulator_GPU->CPU_Data;
 		int nw = fluid.simulator_GPU->nw_;
 		int nh = fluid.simulator_GPU->nh_;
-		//int blks = (nw * nh + NUM_THREADS - 1) / NUM_THREADS;
 		dim3 blks(64, 64);
 		dim3 grid((nw - 1) / blks.x + 1, (nh - 1) / blks.y + 1);
-		//int blks = 1;
 		cudaError_t cudaStatus;
 		int iterTime = 20;
 
@@ -848,35 +460,40 @@ int main(int argc, char* argv[])
                // if(curKeyState == GLFW_PRESS && lastKeyState == GLFW_RELEASE)
                 if (curKeyState == GLFW_PRESS)
                 {
-                    //fluid.step();
-					// 
-					// CPU CHECK
-					//fluid.simulator_GPU->InletJetflow(CPU_Data,1);
-					//advect_u_cpu(CPU_Data->ux_, CPU_Data->uy_, CPU_Data->ux_next ,CPU_Data->uy_next, fluid.simulator_GPU->timeStep,nw, nh);
-					//AdvanceTime_cpu(CPU_Data->ux_, CPU_Data->ux_next, nw, nh);
-					//AdvanceTime_cpu(CPU_Data->uy_, CPU_Data->uy_next, nw, nh);
+
+					#pragma region CPU Main Loop
+					//fluid.step();
+										// 
+										// CPU CHECK
+										//fluid.simulator_GPU->InletJetflow(CPU_Data,1);
+										//advect_u_cpu(CPU_Data->ux_, CPU_Data->uy_, CPU_Data->ux_next ,CPU_Data->uy_next, fluid.simulator_GPU->timeStep,nw, nh);
+										//AdvanceTime_cpu(CPU_Data->ux_, CPU_Data->ux_next, nw, nh);
+										//AdvanceTime_cpu(CPU_Data->uy_, CPU_Data->uy_next, nw, nh);
 
 
-					//diffuse_cpu(CPU_Data->ux_, CPU_Data->ux_next, fluid.simulator_GPU->viscosity, nw, nh);
-					//diffuse_cpu(CPU_Data->uy_, CPU_Data->uy_next, fluid.simulator_GPU->viscosity, nw, nh);
-					//AdvanceTime_cpu(CPU_Data->ux_, CPU_Data->ux_next, nw, nh);
-					//AdvanceTime_cpu(CPU_Data->uy_, CPU_Data->uy_next, nw, nh);
+										//diffuse_cpu(CPU_Data->ux_, CPU_Data->ux_next, fluid.simulator_GPU->viscosity, nw, nh);
+										//diffuse_cpu(CPU_Data->uy_, CPU_Data->uy_next, fluid.simulator_GPU->viscosity, nw, nh);
+										//AdvanceTime_cpu(CPU_Data->ux_, CPU_Data->ux_next, nw, nh);
+										//AdvanceTime_cpu(CPU_Data->uy_, CPU_Data->uy_next, nw, nh);
 
-					//advect_density_cpu(CPU_Data->ux_, CPU_Data->uy_, CPU_Data->density_, CPU_Data->density_next, fluid.simulator_GPU->timeStep, nw, nh);
-					//AdvanceTime_cpu(CPU_Data->density_, CPU_Data->density_next, nw, nh);
+										//advect_density_cpu(CPU_Data->ux_, CPU_Data->uy_, CPU_Data->density_, CPU_Data->density_next, fluid.simulator_GPU->timeStep, nw, nh);
+										//AdvanceTime_cpu(CPU_Data->density_, CPU_Data->density_next, nw, nh);
 
-					//diffuse_cpu(CPU_Data->density_, CPU_Data->density_next, fluid.simulator_GPU->diffk,nw, nh);
-					//AdvanceTime_cpu(CPU_Data->density_, CPU_Data->density_next, nw, nh);
+										//diffuse_cpu(CPU_Data->density_, CPU_Data->density_next, fluid.simulator_GPU->diffk,nw, nh);
+										//AdvanceTime_cpu(CPU_Data->density_, CPU_Data->density_next, nw, nh);
+#pragma endregion
+
+                    
 					
 
-					//GPU
+					//GPU flow inject
 					fluid.simulator_GPU->InletJetflow(CPU_Data,1);
 
 					fluid.simulator_GPU->CPU_TO_GPU(CPU_Data, GPU_Data);
                    
 
 
-					//advect part
+					//advect u
 					Advect_gpu_u <<<blks,grid >>> (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_next, GPU_Data->uy_next, GPU_Data->ux_half, GPU_Data->uy_half,fluid.simulator_GPU->timeStep, nw, nh);
                     cudaDeviceSynchronize();
                     AdvanceTime <<<blks,grid >> > (GPU_Data->ux_, GPU_Data->ux_next,nw,nh);
@@ -898,7 +515,7 @@ int main(int argc, char* argv[])
 					AdvanceTime << <blks,grid >> > (GPU_Data->uy_, GPU_Data->uy_next, nw, nh);
 					cudaDeviceSynchronize();
 
-					//project
+					//project u
 					SetValue << <blks,grid >> > (GPU_Data->pressure, 0.0f, nw, nh);
 					cudaDeviceSynchronize();
 					for (size_t i = 0; i < iterTime; i++)
@@ -909,46 +526,52 @@ int main(int argc, char* argv[])
 					Projection_gpu << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
 					cudaDeviceSynchronize();
 
+#pragma region Advanced part advection-reflection
+					////reflect
+					//Refelect_gpu_u << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_half, GPU_Data->uy_half, fluid.simulator_GPU->timeStep, nw, nh);
+					//cudaDeviceSynchronize();
 
-					//reflect
-					Refelect_gpu_u << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_half, GPU_Data->uy_half, fluid.simulator_GPU->timeStep, nw, nh);
-					cudaDeviceSynchronize();
-
-					//advect
-					Advect_gpu_u << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_next, GPU_Data->uy_next, GPU_Data->ux_half, GPU_Data->uy_half, fluid.simulator_GPU->timeStep, nw, nh);
-					cudaDeviceSynchronize();
-					AdvanceTime << <blks,grid >> > (GPU_Data->ux_, GPU_Data->ux_next, nw, nh);
-					cudaDeviceSynchronize();
-					AdvanceTime << <blks,grid >> > (GPU_Data->uy_, GPU_Data->uy_next, nw, nh);
-					cudaDeviceSynchronize();
+					////advect
+					//Advect_gpu_u << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_next, GPU_Data->uy_next, GPU_Data->ux_half, GPU_Data->uy_half, fluid.simulator_GPU->timeStep, nw, nh);
+					//cudaDeviceSynchronize();
+					//AdvanceTime << <blks,grid >> > (GPU_Data->ux_, GPU_Data->ux_next, nw, nh);
+					//cudaDeviceSynchronize();
+					//AdvanceTime << <blks,grid >> > (GPU_Data->uy_, GPU_Data->uy_next, nw, nh);
+					//cudaDeviceSynchronize();
 
 
 
-					//projec
-					SetValue << <blks,grid >> > (GPU_Data->pressure, 0.0f, nw, nh);
-					cudaDeviceSynchronize();
-					for (size_t i = 0; i < iterTime; i++)
-					{
-						ComputePressure_gpu << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
-						cudaDeviceSynchronize();
-					}
-					Projection_gpu << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
-					cudaDeviceSynchronize();
+					////projection
+					//SetValue << <blks,grid >> > (GPU_Data->pressure, 0.0f, nw, nh);
+					//cudaDeviceSynchronize();
+					//for (size_t i = 0; i < iterTime; i++)
+					//{
+					//	ComputePressure_gpu << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
+					//	cudaDeviceSynchronize();
+					//}
+					//Projection_gpu << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
+					//cudaDeviceSynchronize();
+
+					//
+					////double projection
+					//SetValue << <blks, grid >> > (GPU_Data->pressure, 0.0f, nw, nh);
+					//cudaDeviceSynchronize();
+					//for (size_t i = 0; i < iterTime; i++)
+					//{
+					//	ComputePressure_gpu << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
+					//	cudaDeviceSynchronize();
+					//}
+					//Projection_gpu << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
+					//cudaDeviceSynchronize();
+
+
+#pragma endregion
+
 
 					
 
-					SetValue << <blks, grid >> > (GPU_Data->pressure, 0.0f, nw, nh);
-					cudaDeviceSynchronize();
-					for (size_t i = 0; i < iterTime; i++)
-					{
-						ComputePressure_gpu << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
-						cudaDeviceSynchronize();
-					}
-					Projection_gpu << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
-					cudaDeviceSynchronize();
 
 					//advect density
-
                     Advect_gpu_density <<<blks,grid>>> (GPU_Data->density_, GPU_Data->density_next, GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_next, GPU_Data->uy_next, fluid.simulator_GPU->timeStep, nw, nh);
 					cudaDeviceSynchronize();
                     AdvanceTime << <blks,grid >> > (GPU_Data->density_, GPU_Data->density_next,nw,nh);
@@ -972,6 +595,7 @@ int main(int argc, char* argv[])
 					fluid.simulator_GPU->GPU_TO_CPU(CPU_Data, GPU_Data);
 					printf("doing\n");
 
+					//CUDA BUG LOG
 					cudaStatus = cudaGetLastError();
 					if (cudaStatus != cudaSuccess) {
 						fprintf(stderr, "Kernel launch failed: %s\n", cudaGetErrorString(cudaStatus));

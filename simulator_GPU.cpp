@@ -72,15 +72,15 @@ void FluidSimulator_GPU::GPU_Initialization(FluidData* sq)
 
 void FluidSimulator_GPU::CPU_Initialization(FluidData* sq)
 {
-	sq->density_ = new double[nw_ * nh_]();
-	sq->density_next = new double[nw_ * nh_]();
-	sq->ux_ = new double[nw_ * nh_]();
-	sq->ux_next = new double[nw_ * nh_]();
-	sq->uy_ = new double[nw_ * nh_]();
-	sq->uy_next = new double[nw_ * nh_]();
-	sq->pressure= new double[nw_ * nh_]();
-	sq->ux_half = new double[nw_ * nh_]();
-	sq->uy_half = new double[nw_ * nh_]();
+	sq->density_ = new double[nw_ * nh_] {0};
+	sq->density_next = new double[nw_ * nh_] {0};
+	sq->ux_ = new double[nw_ * nh_] {0};
+	sq->ux_next = new double[nw_ * nh_] {0};
+	sq->uy_ = new double[nw_ * nh_] {0};
+	sq->uy_next = new double[nw_ * nh_] {0};
+	sq->pressure= new double[nw_ * nh_] {0};
+	sq->ux_half = new double[nw_ * nh_] {0};
+	sq->uy_half = new double[nw_ * nh_] {0};
 }
 
 
@@ -113,53 +113,6 @@ void  FluidSimulator_GPU::InletJetflow(FluidData* sq_cpu,double t)
 
 void FluidSimulator_GPU::FluidSquareStep() 
 {
-	//TODO
 
-	//int blks = (nw_ * nh_ + NUM_THREADS - 1) / NUM_THREADS;
-	//advect_gpu_u <<<blks, NUM_THREADS >>> (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_next, GPU_Data->uy_next, timeStep, nw_, nh_);
-	//cudaDeviceSynchronize();
-
-	//AdvanceTime(GPU_Data->ux_, GPU_Data->ux_next);
-	//AdvanceTime(GPU_Data->uy_, GPU_Data->uy_next);
-
-	//advect_gpu_density <<<blks, NUM_THREADS>>> (GPU_Data->density_, GPU_Data->density_next, GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_next, GPU_Data->uy_next, timeStep, nw_, nh_);
-	//AdvanceTime(GPU_Data->density_, GPU_Data->density_next);
-
-	//GPU_TO_CPU(GPU_Data, CPU_Data);
-
-
-	//ALL
-	//diffuse_gpu <<<blks, NUM_THREADS>>>  (1, sq->Vx0, sq->Vx, visc, dt, 4, N);
-	//cudaDeviceSynchronize();
-
-
-	//diffuse_gpu <<<blks, NUM_THREADS>>> (2, sq->Vy0, sq->Vy, visc, dt, 4, N);
-	//cudaDeviceSynchronize();
-
-
-
-	//project_gpu <<<blks, NUM_THREADS>>> (sq->Vx0, sq->Vy0, sq->Vx, sq->Vy, 4, N);
-	//cudaDeviceSynchronize();
-
-
-
-	//advect_gpu  <<<blks, NUM_THREADS>>> (1, sq->Vx, sq->Vx0, sq->Vx0, sq->Vy0, dt, N);
-	//cudaDeviceSynchronize();
-
-
-
-	//advect_gpu  <<<blks, NUM_THREADS>>> (2, sq->Vy, sq->Vy0, sq->Vx0, sq->Vy0, dt, N);
-	//cudaDeviceSynchronize();
-
-
-
-	//project_gpu <<<blks, NUM_THREADS>>> (sq->Vx, sq->Vy, sq->Vx0, sq->Vy0, 4, N);
-	//cudaDeviceSynchronize();
-
-
-	//diffuse_gpu <<<blks, NUM_THREADS>>> (0, sq->density0, sq->density, diff, dt, 4, N);
-	//cudaDeviceSynchronize();
-
-	//advect_gpu  <<<blks, NUM_THREADS>>> (0, sq->density, sq->density0, sq->Vx, sq->Vy, dt, N);
 
 }
