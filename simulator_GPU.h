@@ -1,13 +1,9 @@
 #pragma once
 #include <glm/vec2.hpp>
 #include<iostream>
-#include <Eigen/Core>
-#include <Eigen/Dense>
-#include <Eigen/IterativeLinearSolvers>
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include "cuda.h"
-#include <Eigen/IterativeLinearSolvers>
 #include <glm/glm.hpp>
 
 
