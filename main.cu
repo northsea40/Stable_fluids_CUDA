@@ -594,7 +594,7 @@ int main(int argc, char* argv[])
 					//Check_gpu << <blks, grid >> > (GPU_Data->density_, GPU_Data->density_next, GPU_Data->ux_, GPU_Data->uy_, fluid.simulator_GPU->timeStep, nw, nh);
 
 					fluid.simulator_GPU->GPU_TO_CPU(CPU_Data, GPU_Data);
-					printf("doing\n");
+					//printf("doing\n");
 
 					//CUDA BUG LOG
 					cudaStatus = cudaGetLastError();
