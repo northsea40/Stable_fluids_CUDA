@@ -924,7 +924,7 @@ int main(int argc, char* argv[])
 
 
 
-					//project
+					//projec
 					SetValue << <blks,grid >> > (GPU_Data->pressure, 0.0f, nw, nh);
 					cudaDeviceSynchronize();
 					for (size_t i = 0; i < iterTime; i++)
