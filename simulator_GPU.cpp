@@ -1,6 +1,5 @@
 #include"simulator_GPU.h"
 #include<algorithm>
-#include "device_functions.h"
 const int NUM_THREADS = 16;
 
 
@@ -66,6 +65,7 @@ void FluidSimulator_GPU::GPU_Initialization(FluidData* sq)
 	cudaMalloc((void**)&(sq->uy_), nw_ * nh_ * sizeof(double));
 	cudaMalloc((void**)&(sq->uy_next), nw_ * nh_ * sizeof(double));
 	cudaMalloc((void**)&(sq->pressure), nw_ * nh_ * sizeof(double));
+	cudaMalloc((void**)&(sq->pressure_next), nw_ * nh_ * sizeof(double));
 	cudaMalloc((void**)&(sq->ux_half), nw_ * nh_ * sizeof(double));
 	cudaMalloc((void**)&(sq->uy_half), nw_ * nh_ * sizeof(double));
 }

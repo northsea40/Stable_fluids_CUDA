@@ -22,6 +22,7 @@ typedef struct FluidData
 	double* uy_half;
 
 	double* pressure;
+	double* pressure_next;
 } FluidData;
 
 class FluidSimulator_GPU {
@@ -35,10 +36,10 @@ public:
 	int nw_;
 	int nh_;
 	const int m_num;
-	double timeStep=1.0;
+	double timeStep=2.0;
 	double dx = 1.0f;
-	double viscosity = 0.0001;
-	double diffk = 0.0001;
+	double viscosity = 0.00001;
+	double diffk = 0.01;
 	FluidData* CPU_Data;
 	FluidData* GPU_Data;
 	//const int NUM_THREADS;

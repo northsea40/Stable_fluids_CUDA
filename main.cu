@@ -125,19 +125,33 @@ __global__ void diffuse_gpu(double* ux_, double* ux_next,double viscosity , int 
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
-	double uxpre = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
-	double uxnext = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
-	double uypre = Safe_fetch(ux_next, x, y-1, nw_, nh_);
-	double uynext = Safe_fetch(ux_next, x, y+1, nw_, nh_);
-	ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre+ uxnext + uypre+ uynext)) / (1.0f + 4.0f * viscosity);
+	if ((x + y) % 2 == 0) 
+	{
+		double uxpre = Safe_fetch(ux_, x - 1, y, nw_, nh_);
+		double uxnext = Safe_fetch(ux_, x + 1, y, nw_, nh_);
+		double uypre = Safe_fetch(ux_, x, y - 1, nw_, nh_);
+		double uynext = Safe_fetch(ux_, x, y + 1, nw_, nh_);
+		ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre + uxnext + uypre + uynext)) / (1.0f + 4.0f * viscosity);
+	}
+	__syncthreads();
+	if ((x + y) % 2 != 0) 
+	{
+		double uxpre = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
+		double uxnext = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
+		double uypre = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
+		double uynext = Safe_fetch(ux_next, x, y + 1, nw_, nh_);
+		ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre + uxnext + uypre + uynext)) / (1.0f + 4.0f * viscosity);
+	}
+	
 }
 
 
-__global__ void ComputePressure_gpu(double* ux_, double* uy_, double* pressure, int nw_, int nh_) 
+__global__ void ComputePressure_gpu(double* ux_, double* uy_, double* pressure,double* pressure_next ,int nw_, int nh_) 
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
+
 	double diverg = 0.0f;
 	double uxpre = Safe_fetch(ux_, x - 1, y, nw_, nh_);
 	double uxnext = Safe_fetch(ux_, x + 1, y, nw_, nh_);
@@ -146,12 +160,23 @@ __global__ void ComputePressure_gpu(double* ux_, double* uy_, double* pressure, 
 	diverg = -0.5f * (uxnext - uxpre + uynext - uypre);
 	
 
-	double pressurex_pre = Safe_fetch(pressure, x - 1, y, nw_, nh_);
-	double pressurex_next = Safe_fetch(pressure, x + 1, y, nw_, nh_);
-	double pressurey_pre = Safe_fetch(pressure, x, y+1, nw_, nh_);
-	double pressurey_next = Safe_fetch(pressure, x, y-1, nw_, nh_);
-	pressure[IX(x, y, nw_)] = (diverg + pressurex_pre + pressurex_next + pressurey_next + pressurey_pre) / 4.0f;
-	
+	if ((x + y) % 2 == 0)
+	{
+		double pressurex_pre = Safe_fetch(pressure, x - 1, y, nw_, nh_);
+		double pressurex_next = Safe_fetch(pressure, x + 1, y, nw_, nh_);
+		double pressurey_pre = Safe_fetch(pressure, x, y + 1, nw_, nh_);
+		double pressurey_next = Safe_fetch(pressure, x, y - 1, nw_, nh_);
+		pressure_next[IX(x, y, nw_)] = (diverg + pressurex_pre + pressurex_next + pressurey_next + pressurey_pre) / 4.0f;
+	}
+	__syncthreads();
+	if ((x + y) % 2 != 0)
+	{
+		double pressurex_pre = Safe_fetch(pressure_next, x - 1, y, nw_, nh_);
+		double pressurex_next = Safe_fetch(pressure_next, x + 1, y, nw_, nh_);
+		double pressurey_pre = Safe_fetch(pressure_next, x, y + 1, nw_, nh_);
+		double pressurey_next = Safe_fetch(pressure_next, x, y - 1, nw_, nh_);
+		pressure_next[IX(x, y, nw_)] = (diverg + pressurex_pre + pressurex_next + pressurey_next + pressurey_pre) / 4.0f;
+	}
 }
 
 __global__ void Projection_gpu(double* ux_, double* uy_, double* pressure, int nw_, int nh_) 
@@ -452,8 +477,7 @@ int main(int argc, char* argv[])
                 glfwSetWindowShouldClose(window, true);
 
             processMouseInput(window, &fluid);
-
-            // Updating
+			            // Updating
             {
                 lastKeyState = curKeyState;
                 curKeyState = glfwGetKey(window, GLFW_KEY_P);
@@ -518,12 +542,16 @@ int main(int argc, char* argv[])
 
 					//project u
 					SetValue << <blks,grid >> > (GPU_Data->pressure, 0.0f, nw, nh);
+					SetValue << <blks, grid >> > (GPU_Data->pressure_next, 0.0f, nw, nh);
 					cudaDeviceSynchronize();
 					for (size_t i = 0; i < iterTime; i++)
 					{
-						ComputePressure_gpu << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
+						ComputePressure_gpu << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next,nw, nh);
 						cudaDeviceSynchronize();
 					}
+					AdvanceTime << <blks, grid >> > (GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
+					cudaDeviceSynchronize();
+
 					Projection_gpu << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
 					cudaDeviceSynchronize();
 
