@@ -504,7 +504,7 @@ int main(int argc, char* argv[])
 		dim3 blks(64, 64);
 		dim3 grid((nw - 1) / blks.x + 1, (nh - 1) / blks.y + 1);
 		cudaError_t cudaStatus;
-		int iterTime = 5;
+		int iterTime = 20;
 		bool move_once = false;
 
         // Loop until the user closes the window
