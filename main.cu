@@ -272,6 +272,23 @@ __global__ void Advect_gpu_density(double* density_, double* density_next, doubl
 	density_next[IX(x, y, nw_)] = density_advected;
 }
 
+__global__ void InletJetflow_gpu(double* ux_, double* density_, double t, int nw_, int nh_, int offset)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+	if (x >= 0 && x < 6 && y >= nh_ / 2 - 4 + offset && y < nh_ / 2 + 4 + offset)
+	{
+		ux_[IX(x, y, nw_)] += t;
+		density_[IX(x, y, nw_)] = 1;
+		return;
+	}
+	else if (x <= nw_ - 1 && x >= nw_ - 6 && y >= nh_ / 2 - 4 - offset && y < nh_ / 2 + 4 - offset)
+	{
+		ux_[IX(x, y, nw_)] -= t;
+		density_[IX(x, y, nw_)] = 1;
+		return;
+	}
+}
 
 //For Debug
 __global__ void Check_gpu(double* density_, double* density_next, double* ux_, double* uy_, double timestep, int nw_, int nh_)
@@ -468,6 +485,7 @@ int main(int argc, char* argv[])
 		dim3 grid((nw - 1) / blks.x + 1, (nh - 1) / blks.y + 1);
 		cudaError_t cudaStatus;
 		int iterTime = 20;
+		bool move_once = false;
 
         // Loop until the user closes the window
         while (!glfwWindowShouldClose(window))
@@ -512,9 +530,12 @@ int main(int argc, char* argv[])
 					
 
 					//GPU flow inject
-					fluid.simulator_GPU->InletJetflow(CPU_Data,1);
-
-					fluid.simulator_GPU->CPU_TO_GPU(CPU_Data, GPU_Data);
+					if (move_once == false)
+					{
+						fluid.simulator_GPU->CPU_TO_GPU(CPU_Data, GPU_Data);
+						move_once = true;
+					}
+					InletJetflow_gpu << <blks, grid >> > (GPU_Data->ux_, GPU_Data->density_, 1, nw, nh, 5);
                    
 
 
