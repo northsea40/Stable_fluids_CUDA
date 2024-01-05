@@ -1,6 +1,6 @@
 #include <iostream>
 #include <functional>
-
+#include <chrono>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
@@ -9,6 +9,7 @@
 
 #include "scene.hpp"
 #include <algorithm>
+
 
 void processMouseInput(GLFWwindow* window, FluidScene* camera);
 
@@ -121,27 +122,37 @@ __global__ void SetValue(double* input, double number, int nw_, int nh_)
 
 __global__ void diffuse_gpu(double* ux_, double* ux_next,double viscosity , int nw_,int nh_)
 {
-
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
-	if ((x + y) % 2 == 0) 
-	{
-		double uxpre = Safe_fetch(ux_, x - 1, y, nw_, nh_);
-		double uxnext = Safe_fetch(ux_, x + 1, y, nw_, nh_);
-		double uypre = Safe_fetch(ux_, x, y - 1, nw_, nh_);
-		double uynext = Safe_fetch(ux_, x, y + 1, nw_, nh_);
-		ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre + uxnext + uypre + uynext)) / (1.0f + 4.0f * viscosity);
-	}
-	__syncthreads();
-	if ((x + y) % 2 != 0) 
-	{
-		double uxpre = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
-		double uxnext = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
-		double uypre = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
-		double uynext = Safe_fetch(ux_next, x, y + 1, nw_, nh_);
-		ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre + uxnext + uypre + uynext)) / (1.0f + 4.0f * viscosity);
-	}
+
+
+	//G-S AND R-B
+	//if ((x + y) % 2 == 0) 
+	//{
+	//	double uxpre = Safe_fetch(ux_, x - 1, y, nw_, nh_);
+	//	double uxnext = Safe_fetch(ux_, x + 1, y, nw_, nh_);
+	//	double uypre = Safe_fetch(ux_, x, y - 1, nw_, nh_);
+	//	double uynext = Safe_fetch(ux_, x, y + 1, nw_, nh_);
+	//	ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre + uxnext + uypre + uynext)) / (1.0f + 4.0f * viscosity);
+	//}
+	//__syncthreads();
+	//if ((x + y) % 2 != 0) 
+	//{
+	//	double uxpre = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
+	//	double uxnext = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
+	//	double uypre = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
+	//	double uynext = Safe_fetch(ux_next, x, y + 1, nw_, nh_);
+	//	ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre + uxnext + uypre + uynext)) / (1.0f + 4.0f * viscosity);
+	//}
+
+
+	//Jac
+	double uxpre = Safe_fetch(ux_, x - 1, y, nw_, nh_);
+	double uxnext = Safe_fetch(ux_, x + 1, y, nw_, nh_);
+	double uypre = Safe_fetch(ux_, x, y - 1, nw_, nh_);
+	double uynext = Safe_fetch(ux_, x, y + 1, nw_, nh_);
+	ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre + uxnext + uypre + uynext)) / (1.0f + 4.0f * viscosity);
 	
 }
 
@@ -159,8 +170,8 @@ __global__ void ComputePressure_gpu(double* ux_, double* uy_, double* pressure,d
 	double uynext = Safe_fetch(uy_, x , y+1, nw_, nh_);
 	diverg = -0.5f * (uxnext - uxpre + uynext - uypre);
 	
-
-	if ((x + y) % 2 == 0)
+	//G-S and R-B
+	/*if ((x + y) % 2 == 0)
 	{
 		double pressurex_pre = Safe_fetch(pressure, x - 1, y, nw_, nh_);
 		double pressurex_next = Safe_fetch(pressure, x + 1, y, nw_, nh_);
@@ -176,7 +187,15 @@ __global__ void ComputePressure_gpu(double* ux_, double* uy_, double* pressure,d
 		double pressurey_pre = Safe_fetch(pressure_next, x, y + 1, nw_, nh_);
 		double pressurey_next = Safe_fetch(pressure_next, x, y - 1, nw_, nh_);
 		pressure_next[IX(x, y, nw_)] = (diverg + pressurex_pre + pressurex_next + pressurey_next + pressurey_pre) / 4.0f;
-	}
+	}*/
+
+
+	//jac
+	double pressurex_pre = Safe_fetch(pressure, x - 1, y, nw_, nh_);
+	double pressurex_next = Safe_fetch(pressure, x + 1, y, nw_, nh_);
+	double pressurey_pre = Safe_fetch(pressure, x, y + 1, nw_, nh_);
+	double pressurey_next = Safe_fetch(pressure, x, y - 1, nw_, nh_);
+	pressure_next[IX(x, y, nw_)] = (diverg + pressurex_pre + pressurex_next + pressurey_next + pressurey_pre) / 4.0f;
 }
 
 __global__ void Projection_gpu(double* ux_, double* uy_, double* pressure, int nw_, int nh_) 
@@ -419,7 +438,8 @@ int main(int argc, char* argv[])
     GLFWwindow* window;
     unsigned width = 1000;
     unsigned height =1000 ;
-
+	float totalTime = 0.0f;
+	int loopTImes = 0;
     // Window setups
     {
         if (!glfwInit()) // Initialize glfw library
@@ -484,7 +504,7 @@ int main(int argc, char* argv[])
 		dim3 blks(64, 64);
 		dim3 grid((nw - 1) / blks.x + 1, (nh - 1) / blks.y + 1);
 		cudaError_t cudaStatus;
-		int iterTime = 20;
+		int iterTime = 5;
 		bool move_once = false;
 
         // Loop until the user closes the window
@@ -503,7 +523,7 @@ int main(int argc, char* argv[])
                // if(curKeyState == GLFW_PRESS && lastKeyState == GLFW_RELEASE)
                 if (curKeyState == GLFW_PRESS)
                 {
-
+					auto start = std::chrono::high_resolution_clock::now();
 					#pragma region CPU Main Loop
 					//fluid.step();
 										// 
@@ -555,11 +575,12 @@ int main(int argc, char* argv[])
 						cudaDeviceSynchronize();
 						diffuse_gpu <<<blks,grid >>> (GPU_Data->uy_, GPU_Data->uy_next, fluid.simulator_GPU->viscosity, nw, nh);			
 						cudaDeviceSynchronize();
+						AdvanceTime << <blks, grid >> > (GPU_Data->ux_, GPU_Data->ux_next, nw, nh);
+						cudaDeviceSynchronize();
+						AdvanceTime << <blks, grid >> > (GPU_Data->uy_, GPU_Data->uy_next, nw, nh);
+						cudaDeviceSynchronize();
 					}
-					AdvanceTime << <blks,grid >> > (GPU_Data->ux_, GPU_Data->ux_next, nw, nh);
-					cudaDeviceSynchronize();
-					AdvanceTime << <blks,grid >> > (GPU_Data->uy_, GPU_Data->uy_next, nw, nh);
-					cudaDeviceSynchronize();
+				
 
 					//project u
 					SetValue << <blks,grid >> > (GPU_Data->pressure, 0.0f, nw, nh);
@@ -569,12 +590,13 @@ int main(int argc, char* argv[])
 					{
 						ComputePressure_gpu << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next,nw, nh);
 						cudaDeviceSynchronize();
+						AdvanceTime << <blks, grid >> > (GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
+						cudaDeviceSynchronize();
 					}
-					AdvanceTime << <blks, grid >> > (GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
+					Projection_gpu << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
 					cudaDeviceSynchronize();
 
-					Projection_gpu << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
-					cudaDeviceSynchronize();
+				
 
 #pragma region Advanced part advection-reflection
 					////reflect
@@ -631,13 +653,17 @@ int main(int argc, char* argv[])
 					{
 						diffuse_gpu << <blks, grid >> > (GPU_Data->density_, GPU_Data->density_next, fluid.simulator_GPU->diffk, nw, nh);
 						cudaDeviceSynchronize();
+						AdvanceTime << <blks, grid >> > (GPU_Data->density_, GPU_Data->density_next, nw, nh);
+						cudaDeviceSynchronize();
 					}
-					AdvanceTime << <blks,grid >> > (GPU_Data->density_, GPU_Data->density_next, nw, nh);
-					cudaDeviceSynchronize();
+				
 
 
 
-					
+					auto end = std::chrono::high_resolution_clock::now();
+					auto duration = std::chrono::duration_cast<std::chrono::seconds>(end - start);
+					totalTime += duration.count();
+					loopTImes += 1;
 
 
 					//Check_gpu << <blks, grid >> > (GPU_Data->density_, GPU_Data->density_next, GPU_Data->ux_, GPU_Data->uy_, fluid.simulator_GPU->timeStep, nw, nh);
@@ -669,6 +695,7 @@ int main(int argc, char* argv[])
     }
 
     glfwTerminate();
+	std::cout << "Execution time: " << totalTime/loopTImes << " seconds" << std::endl;
     return 0;
 }
 
