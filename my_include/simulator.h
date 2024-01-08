@@ -55,8 +55,8 @@ public:
 	void ApplyDeltaVelocity(int x, int y, glm::vec2 delta_velocity)
 	{
 		
-		ux_[idx(x, y)] += 5.0f*delta_velocity.x;
-		uy_[idx(x, y)] += 5.0f*delta_velocity.y;
+	//	ux_[idx(x, y)] += 5.0f*delta_velocity.x;
+	//	uy_[idx(x, y)] += 5.0f*delta_velocity.y;
 	//	std::cout << ux_[idx(x, y)] << " " << uy_[idx(x, y)] << std::endl;
 		
 

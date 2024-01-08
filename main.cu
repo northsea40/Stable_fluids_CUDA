@@ -212,31 +212,63 @@ __global__ void diffuse_gpu(double* ux_, double* ux_next,double viscosity , int 
 	double uxnext = ux_next_shared[IX(threadIdx.x + 2, threadIdx.y + 1, BLOCK_WIDTH + 2)];
 	double uypre = ux_next_shared[IX(threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH + 2)];
 	double uynext = ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 2, BLOCK_WIDTH + 2)];
-
-
-
-	// __shared__ double ux_next_shared[(BLOCK_WIDTH) * (BLOCK_HEIGHT)];
-	//ux_next_shared[IX(threadIdx.x, threadIdx.y, BLOCK_WIDTH)] = ux_next[IX(x, y, nw_)];
-	//__syncthreads();
-
-	/*double uxpre = Safe_fetch_shared(ux_next_shared,ux_next, threadIdx.x - 1, threadIdx.y, x-1,y,BLOCK_WIDTH,nw_);
-	double uxnext = Safe_fetch_shared(ux_next_shared, ux_next, threadIdx.x + 1, threadIdx.y, x +1, y, BLOCK_WIDTH, nw_);
-	double uypre = Safe_fetch_shared(ux_next_shared, ux_next,threadIdx.x, threadIdx.y - 1, x , y-1, BLOCK_WIDTH, nw_);
-	double uynext = Safe_fetch_shared(ux_next_shared, ux_next,threadIdx.x, threadIdx.y + 1, x , y+1, BLOCK_WIDTH, nw_);*/
 	ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre + uxnext + uypre + uynext)) / (1.0f + 4.0f * viscosity);
 
-
-	//double uxpre = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
-//double uxnext = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
-//double uypre = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
-//double uynext = Safe_fetch(ux_next, x, y + 1, nw_, nh_); 
 
 }
 
 
-__global__ void diffuse_gpu_inner(double* ux_, double* ux_next, double viscosity, int nw_, int nh_) {}
+__global__ void diffuse_gpu_inner(double* ux_, double* ux_next, double viscosity, int nw_, int nh_) 
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+	if (x >= nw_ || y >= nh_) return;
+	//allign with global index
+	x += 1;
+	y += 1;
 
-__global__ void diffuse_gpu_border(double* ux_, double* ux_next, double viscosity, int nw_, int nh_) {}
+	__shared__ double ux_next_shared[(BLOCK_WIDTH + 2) * (BLOCK_HEIGHT + 2)];
+	ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 1, BLOCK_WIDTH + 2)] = ux_next[IX(x, y, nw_)];
+	if (threadIdx.x == 0)
+	{
+		ux_next_shared[IX(threadIdx.x, threadIdx.y + 1, BLOCK_WIDTH + 2)] = ux_next[IX(x-1, y, nw_)];
+	}
+	if (threadIdx.x == blockDim.x - 1 || x == nw_ - 1)
+	{
+		ux_next_shared[IX(threadIdx.x + 2, threadIdx.y + 1, BLOCK_WIDTH + 2)] = ux_next[IX(x + 1, y, nw_)];
+	}
+	if (threadIdx.y == 0)
+	{
+		ux_next_shared[IX(threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH + 2)] = ux_next[IX(x , y-1, nw_)];
+	}
+	if (threadIdx.y == blockDim.y - 1 || y == nw_ - 1)
+	{
+		ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 2, BLOCK_WIDTH + 2)] = ux_next[IX(x, y + 1, nw_)];
+	}
+	// sync threads
+	__syncthreads();
+	double uxpre = ux_next_shared[IX(threadIdx.x, threadIdx.y + 1, BLOCK_WIDTH + 2)];
+	double uxnext = ux_next_shared[IX(threadIdx.x + 2, threadIdx.y + 1, BLOCK_WIDTH + 2)];
+	double uypre = ux_next_shared[IX(threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH + 2)];
+	double uynext = ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 2, BLOCK_WIDTH + 2)];
+	ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre + uxnext + uypre + uynext)) / (1.0f + 4.0f * viscosity);
+
+
+}
+
+__global__ void diffuse_gpu_border(double* ux_, double* ux_next, double viscosity, int nw_, int nh_) 
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+	if (x >= nw_ || y >= nh_) return;
+	if (x > 0 || x < nw_ - 1 || y>0 || y < nh_ - 1) return;
+	double uxpre = Safe_fetch(ux_next, x - 1, y, nw_,nh_);
+	double uxnext = Safe_fetch(ux_next, x +1, y, nw_, nh_);
+	double uypre = Safe_fetch(ux_next, x , y-1, nw_, nh_);
+	double uynext = Safe_fetch(ux_next, x , y+1, nw_, nh_);
+	ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre + uxnext + uypre + uynext)) / (1.0f + 4.0f * viscosity);
+
+}
 
 __global__ void ComputePressure_gpu(double* ux_, double* uy_, double* pressure,double* pressure_next ,int nw_, int nh_) 
 {
@@ -604,6 +636,10 @@ int main(int argc, char* argv[])
 		int nh = fluid.simulator_GPU->nh_;
 		dim3 blks(BLOCK_WIDTH, BLOCK_HEIGHT);
 		dim3 grid((nw - 1) / blks.x + 1, (nh - 1) / blks.y + 1);
+
+		dim3 blks_inner(BLOCK_WIDTH, BLOCK_HEIGHT);
+		dim3 grid_inner((nw-2 - 1) / blks.x + 1, (nh-2 - 1) / blks.y + 1);
+
 		cudaError_t cudaStatus;
 		int iterTime = 40;
 		bool move_once = false;

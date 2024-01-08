@@ -62,7 +62,7 @@ public:
 
 	void GPU_Initialization(FluidData* sq);
 	void CPU_Initialization(FluidData* sq);
-	void CPU_Initialization_ib_helpler(double** uib,double* u);
+	void CPU_Initialization_ib_helpler(double** uib,double* u,int nw_);
 	void GPU_TO_CPU(FluidData* sq_cpu, FluidData* sq_gpu);
 	void CPU_TO_GPU(FluidData* sq_cpu, FluidData* sq_gpu);
 	void InletJetflow(FluidData* sq_cpu,double t);
