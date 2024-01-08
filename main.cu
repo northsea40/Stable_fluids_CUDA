@@ -169,35 +169,35 @@ __global__ void diffuse_gpu(double* ux_, double* ux_next, double viscosity, int 
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
 
-	//__shared__ double ux_next_shared[(BLOCK_WIDTH + 2) * (BLOCK_HEIGHT + 2)];
-	//ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 1, BLOCK_WIDTH + 2)] = ux_next[IX(x, y, nw_)];
-	//if (threadIdx.x == 0)
-	//{
-	//	ux_next_shared[IX(threadIdx.x, threadIdx.y + 1, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
-	//}
-	//if (threadIdx.x == blockDim.x - 1 || x == nw_ - 1)
-	//{
-	//	ux_next_shared[IX(threadIdx.x + 2, threadIdx.y + 1, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
-	//}
-	//if (threadIdx.y == 0)
-	//{
-	//	ux_next_shared[IX(threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
-	//}
-	//if (threadIdx.y == blockDim.y - 1 || y == nh_ - 1)
-	//{
-	//	ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 2, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x, y + 1, nw_, nh_);
-	//}
-	//__syncthreads();
-	//double uxpre = ux_next_shared[IX(threadIdx.x, threadIdx.y + 1, BLOCK_WIDTH + 2)];
-	//double uxnext = ux_next_shared[IX(threadIdx.x + 2, threadIdx.y + 1, BLOCK_WIDTH + 2)];
-	//double uypre = ux_next_shared[IX(threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH + 2)];
-	//double uynext = ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 2, BLOCK_WIDTH + 2)];
-
-	double uxpre = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
-	double uxnext = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
-	double uypre = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
-	double uynext = Safe_fetch(ux_next, x, y + 1, nw_, nh_);
+	__shared__ double ux_next_shared[(BLOCK_WIDTH + 2) * (BLOCK_HEIGHT + 2)];
+	ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 1, BLOCK_WIDTH + 2)] = ux_next[IX(x, y, nw_)];
+	if (threadIdx.x == 0)
+	{
+		ux_next_shared[IX(threadIdx.x, threadIdx.y + 1, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
+	}
+	if (threadIdx.x == blockDim.x - 1 || x == nw_ - 1)
+	{
+		ux_next_shared[IX(threadIdx.x + 2, threadIdx.y + 1, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
+	}
+	if (threadIdx.y == 0)
+	{
+		ux_next_shared[IX(threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
+	}
+	if (threadIdx.y == blockDim.y - 1 || y == nh_ - 1)
+	{
+		ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 2, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x, y + 1, nw_, nh_);
+	}
 	__syncthreads();
+	double uxpre = ux_next_shared[IX(threadIdx.x, threadIdx.y + 1, BLOCK_WIDTH + 2)];
+	double uxnext = ux_next_shared[IX(threadIdx.x + 2, threadIdx.y + 1, BLOCK_WIDTH + 2)];
+	double uypre = ux_next_shared[IX(threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH + 2)];
+	double uynext = ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 2, BLOCK_WIDTH + 2)];
+
+	//double uxpre = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
+	//double uxnext = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
+	//double uypre = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
+	//double uynext = Safe_fetch(ux_next, x, y + 1, nw_, nh_);
+	//__syncthreads();
 
 	ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre + uxnext + uypre + uynext)) / (1.0f + 4.0f * viscosity);
 }
