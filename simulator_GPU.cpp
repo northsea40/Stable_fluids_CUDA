@@ -70,6 +70,11 @@ void FluidSimulator_GPU::GPU_Initialization(FluidData* sq)
 	cudaMalloc((void**)&(sq->uy_half), nw_ * nh_ * sizeof(double));
 }
 
+void FluidSimulator_GPU::CPU_Initialization_ib_helpler(double** uib, double* u) 
+{
+
+}
+
 void FluidSimulator_GPU::CPU_Initialization(FluidData* sq)
 {
 	sq->density_ = new double[nw_ * nh_] {0};
@@ -81,6 +86,17 @@ void FluidSimulator_GPU::CPU_Initialization(FluidData* sq)
 	sq->pressure= new double[nw_ * nh_] {0};
 	sq->ux_half = new double[nw_ * nh_] {0};
 	sq->uy_half = new double[nw_ * nh_] {0};
+
+	sq->ux_inner = new double* [nw_ - 2];
+	sq->uy_inner = new double* [nw_ - 2];
+	sq->ux_next_inner = new double* [nw_ - 2];
+	sq->uy_next_inner = new double* [nw_ - 2];
+
+	sq->ux_border = new double* [4];
+	sq->uy_border = new double* [4];
+	sq->ux_next_border = new double* [4];
+	sq->uy_next_border = new double* [4];
+
 }
 
 

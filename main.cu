@@ -11,6 +11,18 @@
 #include <algorithm>
 
 
+#define CHECK(call)                                                      \
+{                                                                        \
+   const cudaError_t error = call;                                       \
+   if (error != cudaSuccess)                                             \
+   {                                                                     \
+      printf("Error: %s:%d, ", __FILE__, __LINE__);                      \
+      printf("code:%d, reason: %s\n", error, cudaGetErrorString(error)); \
+      exit(1);                                                           \
+   }                                                                     \
+}
+
+
 void processMouseInput(GLFWwindow* window, FluidScene* camera);
 
 const int NUM_THREADS=32;
@@ -102,12 +114,22 @@ __device__ double Safe_fetch(double* u, int x, int y, int nw_, int nh_)
 	return u[IX(safeIndex_x, safeIndex_y, nw_)];
 }
 
+
+__device__ double Safe_fetch_shared(double* u_local,double* u_global ,int x_local, int y_local,int x_global,int y_global,int n_local, int n_global)
+{
+	if (x_local<0 || x_local>n_local - 1 || y_local<0 || y_local>n_local - 1) 
+	{
+		return Safe_fetch(u_global, x_global, y_global, n_global,n_global);
+	}
+	return u_local[IX(x_local, y_local, n_local)];
+}
+
+
 __global__ void AdvanceTime(double* oldarray, double* newarray, int nw_, int nh_)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
-
 	oldarray[IX(x, y, nw_)] = newarray[IX(x, y, nw_)];
 }
 
@@ -167,14 +189,12 @@ __global__ void diffuse_gpu(double* ux_, double* ux_next,double viscosity , int 
 	if (x >= nw_ || y >= nh_) return;
 
 	__shared__ double ux_next_shared[(BLOCK_WIDTH + 2) * (BLOCK_HEIGHT + 2)];
-	//__shared__ double ux_next_shared[(BLOCK_WIDTH+2) * (BLOCK_HEIGHT+2)];
-	//ux_next_shared[IX(threadIdx.x, threadIdx.y, BLOCK_WIDTH)] = ux_next[IX(x, y, nw_)];
 	ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 1, BLOCK_WIDTH + 2)] = ux_next[IX(x, y, nw_)];
 	if (threadIdx.x == 0)
 	{
 		ux_next_shared[IX(threadIdx.x, threadIdx.y + 1, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
 	}
-	if (threadIdx.x == BLOCK_WIDTH - 1)
+	if (threadIdx.x == blockDim.x - 1||x==nw_-1)
 	{
 		ux_next_shared[IX(threadIdx.x + 2, threadIdx.y + 1, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
 	}
@@ -182,35 +202,41 @@ __global__ void diffuse_gpu(double* ux_, double* ux_next,double viscosity , int 
 	{
 		ux_next_shared[IX(threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
 	}
-	if (threadIdx.y == BLOCK_HEIGHT - 1)
+	if (threadIdx.y == blockDim.y - 1 || y == nw_ - 1)
 	{
 		ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 2, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x, y + 1, nw_, nh_);
 	}
-	// sync threads
+	 // sync threads
 	__syncthreads();
-	//double uxpre = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
-	//double uxnext = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
-	//double uypre = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
-	//double uynext = Safe_fetch(ux_next, x, y + 1, nw_, nh_); 
 	double uxpre = ux_next_shared[IX(threadIdx.x, threadIdx.y + 1, BLOCK_WIDTH + 2)];
 	double uxnext = ux_next_shared[IX(threadIdx.x + 2, threadIdx.y + 1, BLOCK_WIDTH + 2)];
 	double uypre = ux_next_shared[IX(threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH + 2)];
 	double uynext = ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 2, BLOCK_WIDTH + 2)];
-	//double uxpre = Safe_fetch(ux_next_shared, threadIdx.x - 1, threadIdx.y, BLOCK_WIDTH, BLOCK_HEIGHT);
-	//double uxnext = Safe_fetch(ux_next_shared, threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH, BLOCK_HEIGHT);
-	//double uypre = Safe_fetch(ux_next_shared, threadIdx.x, threadIdx.y - 1, BLOCK_WIDTH, BLOCK_HEIGHT);
-	//double uynext = Safe_fetch(ux_next_shared, threadIdx.x, threadIdx.y + 1, BLOCK_WIDTH, BLOCK_HEIGHT);
-	// if equal to nan
-	//if (isnan(uxpre) || isnan(uxnext) || isnan(uypre) || isnan(uynext))
-	//{
-	//	for (int i = 0; i < 100; i++)
-	//		printf("error\n");
-	//}
+
+
+
+	// __shared__ double ux_next_shared[(BLOCK_WIDTH) * (BLOCK_HEIGHT)];
+	//ux_next_shared[IX(threadIdx.x, threadIdx.y, BLOCK_WIDTH)] = ux_next[IX(x, y, nw_)];
+	//__syncthreads();
+
+	/*double uxpre = Safe_fetch_shared(ux_next_shared,ux_next, threadIdx.x - 1, threadIdx.y, x-1,y,BLOCK_WIDTH,nw_);
+	double uxnext = Safe_fetch_shared(ux_next_shared, ux_next, threadIdx.x + 1, threadIdx.y, x +1, y, BLOCK_WIDTH, nw_);
+	double uypre = Safe_fetch_shared(ux_next_shared, ux_next,threadIdx.x, threadIdx.y - 1, x , y-1, BLOCK_WIDTH, nw_);
+	double uynext = Safe_fetch_shared(ux_next_shared, ux_next,threadIdx.x, threadIdx.y + 1, x , y+1, BLOCK_WIDTH, nw_);*/
 	ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre + uxnext + uypre + uynext)) / (1.0f + 4.0f * viscosity);
 
 
+	//double uxpre = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
+//double uxnext = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
+//double uypre = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
+//double uynext = Safe_fetch(ux_next, x, y + 1, nw_, nh_); 
+
 }
 
+
+__global__ void diffuse_gpu_inner(double* ux_, double* ux_next, double viscosity, int nw_, int nh_) {}
+
+__global__ void diffuse_gpu_border(double* ux_, double* ux_next, double viscosity, int nw_, int nh_) {}
 
 __global__ void ComputePressure_gpu(double* ux_, double* uy_, double* pressure,double* pressure_next ,int nw_, int nh_) 
 {
@@ -490,6 +516,26 @@ void advect_density_cpu(double* ux_, double* uy_, double* density_, double* dens
 
 int main(int argc, char* argv[])
 {
+	//check cuda info
+
+	int dev = 0;
+	cudaDeviceProp deviceProp;
+	CHECK(cudaGetDeviceProperties(&deviceProp, dev));
+	printf("%s using Device %d: %s\n", argv[0], dev, deviceProp.name);
+
+	printf("Number of multiprocessors: %d\n", deviceProp.multiProcessorCount);
+
+	printf("Total number of registers available per block: %d\n",
+		deviceProp.regsPerBlock);
+	printf("Warp size%d\n", deviceProp.warpSize);
+	printf("Maximum number of threads per block: %d\n", deviceProp.maxThreadsPerBlock);
+	printf("Maximum number of threads per multiprocessor: %d\n",
+		deviceProp.maxThreadsPerMultiProcessor);
+	printf("Maximum number of warps per multiprocessor: %d\n",
+		deviceProp.maxThreadsPerMultiProcessor / 32);
+
+
+
     GLFWwindow* window;
     unsigned width = 1000;
     unsigned height =1000 ;
@@ -556,7 +602,7 @@ int main(int argc, char* argv[])
 		FluidData* CPU_Data = fluid.simulator_GPU->CPU_Data;
 		int nw = fluid.simulator_GPU->nw_;
 		int nh = fluid.simulator_GPU->nh_;
-		dim3 blks(64, 64);
+		dim3 blks(BLOCK_WIDTH, BLOCK_HEIGHT);
 		dim3 grid((nw - 1) / blks.x + 1, (nh - 1) / blks.y + 1);
 		cudaError_t cudaStatus;
 		int iterTime = 40;
@@ -623,9 +669,9 @@ int main(int argc, char* argv[])
 					{
 						diffuse_gpu <<<blks,grid >>> (GPU_Data->ux_, GPU_Data->ux_next, fluid.simulator_GPU->viscosity, nw, nh);
 						cudaDeviceSynchronize();
-						diffuse_gpu <<<blks,grid >>> (GPU_Data->uy_, GPU_Data->uy_next, fluid.simulator_GPU->viscosity, nw, nh);			
-						cudaDeviceSynchronize();
 						AdvanceTime << <blks, grid >> > (GPU_Data->ux_, GPU_Data->ux_next, nw, nh);
+						cudaDeviceSynchronize();
+						diffuse_gpu <<<blks,grid >>> (GPU_Data->uy_, GPU_Data->uy_next, fluid.simulator_GPU->viscosity, nw, nh);			
 						cudaDeviceSynchronize();
 						AdvanceTime << <blks, grid >> > (GPU_Data->uy_, GPU_Data->uy_next, nw, nh);
 						cudaDeviceSynchronize();
@@ -715,11 +761,7 @@ int main(int argc, char* argv[])
 					
 
 
-					//advect density
-                    Advect_gpu_density <<<blks,grid>>> (GPU_Data->density_, GPU_Data->density_next, GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_next, GPU_Data->uy_next, fluid.simulator_GPU->timeStep, nw, nh);
-					cudaDeviceSynchronize();
-                    AdvanceTime << <blks,grid >> > (GPU_Data->density_, GPU_Data->density_next,nw,nh);
-					cudaDeviceSynchronize();
+			
 					//diffuse density
 					for (size_t i = 0; i < iterTime; i++)
 					{
@@ -728,7 +770,12 @@ int main(int argc, char* argv[])
 						AdvanceTime << <blks, grid >> > (GPU_Data->density_, GPU_Data->density_next, nw, nh);
 						cudaDeviceSynchronize();
 					}
-				
+					
+					//advect density
+					Advect_gpu_density << <blks, grid >> > (GPU_Data->density_, GPU_Data->density_next, GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_next, GPU_Data->uy_next, fluid.simulator_GPU->timeStep, nw, nh);
+					cudaDeviceSynchronize();
+					AdvanceTime << <blks, grid >> > (GPU_Data->density_, GPU_Data->density_next, nw, nh);
+					cudaDeviceSynchronize();
 
 
 

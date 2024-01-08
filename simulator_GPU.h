@@ -14,9 +14,18 @@ typedef struct FluidData
 
 	double* ux_;
 	double* uy_;
+	double** ux_inner;
+	double** uy_inner;
+	double** ux_border;
+	double** uy_border;
+
 
 	double* ux_next;
 	double* uy_next;
+	double** ux_next_inner;
+	double** uy_next_inner;
+	double** ux_next_border;
+	double** uy_next_border;
 
 	double* ux_half;
 	double* uy_half;
@@ -53,6 +62,7 @@ public:
 
 	void GPU_Initialization(FluidData* sq);
 	void CPU_Initialization(FluidData* sq);
+	void CPU_Initialization_ib_helpler(double** uib,double* u);
 	void GPU_TO_CPU(FluidData* sq_cpu, FluidData* sq_gpu);
 	void CPU_TO_GPU(FluidData* sq_cpu, FluidData* sq_gpu);
 	void InletJetflow(FluidData* sq_cpu,double t);
