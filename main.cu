@@ -10,10 +10,13 @@
 #include "scene.hpp"
 #include <algorithm>
 
+#include <cuda.h>
+#include <device_functions.h>
+#include <cuda_runtime.h>
 
 void processMouseInput(GLFWwindow* window, FluidScene* camera);
 
-const int NUM_THREADS=32;
+const int NUM_THREADS = 32;
 const int BLOCK_WIDTH = 64;
 const int BLOCK_HEIGHT = 64;
 
@@ -49,14 +52,14 @@ __device__ double Interpolation(double x, double y, double* u, unsigned nw_)
 }
 
 //Set specific value for boundary
-__device__ void Set_boundary(double* u,int x,int y,int nw_,int nh_)
+__device__ void Set_boundary(double* u, int x, int y, int nw_, int nh_)
 {
-	if (x == 0 && y == 0) 
+	if (x == 0 && y == 0)
 	{
-		u[IX(x, y,nw_)] = 0.25 * u[IX(1, 0,nw_)] + 0.25 * u[IX(0, 1,nw_)];
+		u[IX(x, y, nw_)] = 0.25 * u[IX(1, 0, nw_)] + 0.25 * u[IX(0, 1, nw_)];
 		return;
 	}
-	if (x == nw_-1 && y == 0)
+	if (x == nw_ - 1 && y == 0)
 	{
 		u[IX(x, y, nw_)] = 0.25 * u[IX(nw_ - 2, 0, nw_)] + 0.25 * u[IX(nw_ - 1, 1, nw_)];
 		return;
@@ -71,9 +74,9 @@ __device__ void Set_boundary(double* u,int x,int y,int nw_,int nh_)
 		u[IX(x, y, nw_)] = 0.25 * u[IX(nw_ - 2, nh_ - 1, nw_)] + 0.25 * u[IX(nw_ - 1, nh_ - 2, nw_)];
 		return;
 	}
-	if (x==0)
+	if (x == 0)
 	{
-		u[IX(x, y,nw_)] = 0.5f * u[IX(1, y,nw_)];
+		u[IX(x, y, nw_)] = 0.5f * u[IX(1, y, nw_)];
 		return;
 	}
 	if (x == nw_ - 1)
@@ -88,17 +91,17 @@ __device__ void Set_boundary(double* u,int x,int y,int nw_,int nh_)
 	}
 	if (y == nh_ - 1)
 	{
-		u[IX(x, y, nw_)] = 0.5f * u[IX(x, nh_-2, nw_)];
+		u[IX(x, y, nw_)] = 0.5f * u[IX(x, nh_ - 2, nw_)];
 		return;
 	}
 }
-	
+
 
 //For out of index fetch,use itself value
-__device__ double Safe_fetch(double* u, int x, int y, int nw_, int nh_) 
+__device__ double Safe_fetch(double* u, int x, int y, int nw_, int nh_)
 {
-	double safeIndex_x = Clamp(x, 0, nw_-1);
-	double safeIndex_y = Clamp(y, 0, nh_-1);
+	double safeIndex_x = Clamp(x, 0, nw_ - 1);
+	double safeIndex_y = Clamp(y, 0, nh_ - 1);
 	return u[IX(safeIndex_x, safeIndex_y, nw_)];
 }
 
@@ -112,17 +115,17 @@ __global__ void AdvanceTime(double* oldarray, double* newarray, int nw_, int nh_
 }
 
 //Set value to 0
-__global__ void SetValue(double* input, double number, int nw_, int nh_) 
+__global__ void SetValue(double* input, double number, int nw_, int nh_)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
-	input[IX(x,y,nw_)] = 0;
+	input[IX(x, y, nw_)] = 0;
 }
 
 
 
-__global__ void diffuse_gpu(double* ux_, double* ux_next,double viscosity , int nw_,int nh_)
+__global__ void diffuse_gpu(double* ux_, double* ux_next, double viscosity, int nw_, int nh_)
 {
 #pragma region MyRegion
 
@@ -166,53 +169,40 @@ __global__ void diffuse_gpu(double* ux_, double* ux_next,double viscosity , int 
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
 
-	__shared__ double ux_next_shared[(BLOCK_WIDTH + 2) * (BLOCK_HEIGHT + 2)];
-	//__shared__ double ux_next_shared[(BLOCK_WIDTH+2) * (BLOCK_HEIGHT+2)];
-	//ux_next_shared[IX(threadIdx.x, threadIdx.y, BLOCK_WIDTH)] = ux_next[IX(x, y, nw_)];
-	ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 1, BLOCK_WIDTH + 2)] = ux_next[IX(x, y, nw_)];
-	if (threadIdx.x == 0)
-	{
-		ux_next_shared[IX(threadIdx.x, threadIdx.y + 1, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
-	}
-	if (threadIdx.x == BLOCK_WIDTH - 1)
-	{
-		ux_next_shared[IX(threadIdx.x + 2, threadIdx.y + 1, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
-	}
-	if (threadIdx.y == 0)
-	{
-		ux_next_shared[IX(threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
-	}
-	if (threadIdx.y == BLOCK_HEIGHT - 1)
-	{
-		ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 2, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x, y + 1, nw_, nh_);
-	}
-	// sync threads
-	__syncthreads();
-	//double uxpre = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
-	//double uxnext = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
-	//double uypre = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
-	//double uynext = Safe_fetch(ux_next, x, y + 1, nw_, nh_); 
-	double uxpre = ux_next_shared[IX(threadIdx.x, threadIdx.y + 1, BLOCK_WIDTH + 2)];
-	double uxnext = ux_next_shared[IX(threadIdx.x + 2, threadIdx.y + 1, BLOCK_WIDTH + 2)];
-	double uypre = ux_next_shared[IX(threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH + 2)];
-	double uynext = ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 2, BLOCK_WIDTH + 2)];
-	//double uxpre = Safe_fetch(ux_next_shared, threadIdx.x - 1, threadIdx.y, BLOCK_WIDTH, BLOCK_HEIGHT);
-	//double uxnext = Safe_fetch(ux_next_shared, threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH, BLOCK_HEIGHT);
-	//double uypre = Safe_fetch(ux_next_shared, threadIdx.x, threadIdx.y - 1, BLOCK_WIDTH, BLOCK_HEIGHT);
-	//double uynext = Safe_fetch(ux_next_shared, threadIdx.x, threadIdx.y + 1, BLOCK_WIDTH, BLOCK_HEIGHT);
-	// if equal to nan
-	//if (isnan(uxpre) || isnan(uxnext) || isnan(uypre) || isnan(uynext))
+	//__shared__ double ux_next_shared[(BLOCK_WIDTH + 2) * (BLOCK_HEIGHT + 2)];
+	//ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 1, BLOCK_WIDTH + 2)] = ux_next[IX(x, y, nw_)];
+	//if (threadIdx.x == 0)
 	//{
-	//	for (int i = 0; i < 100; i++)
-	//		printf("error\n");
+	//	ux_next_shared[IX(threadIdx.x, threadIdx.y + 1, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
 	//}
+	//if (threadIdx.x == blockDim.x - 1 || x == nw_ - 1)
+	//{
+	//	ux_next_shared[IX(threadIdx.x + 2, threadIdx.y + 1, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
+	//}
+	//if (threadIdx.y == 0)
+	//{
+	//	ux_next_shared[IX(threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
+	//}
+	//if (threadIdx.y == blockDim.y - 1 || y == nh_ - 1)
+	//{
+	//	ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 2, BLOCK_WIDTH + 2)] = Safe_fetch(ux_next, x, y + 1, nw_, nh_);
+	//}
+	//__syncthreads();
+	//double uxpre = ux_next_shared[IX(threadIdx.x, threadIdx.y + 1, BLOCK_WIDTH + 2)];
+	//double uxnext = ux_next_shared[IX(threadIdx.x + 2, threadIdx.y + 1, BLOCK_WIDTH + 2)];
+	//double uypre = ux_next_shared[IX(threadIdx.x + 1, threadIdx.y, BLOCK_WIDTH + 2)];
+	//double uynext = ux_next_shared[IX(threadIdx.x + 1, threadIdx.y + 2, BLOCK_WIDTH + 2)];
+
+	double uxpre = Safe_fetch(ux_next, x - 1, y, nw_, nh_);
+	double uxnext = Safe_fetch(ux_next, x + 1, y, nw_, nh_);
+	double uypre = Safe_fetch(ux_next, x, y - 1, nw_, nh_);
+	double uynext = Safe_fetch(ux_next, x, y + 1, nw_, nh_);
+	__syncthreads();
+
 	ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (uxpre + uxnext + uypre + uynext)) / (1.0f + 4.0f * viscosity);
-
-
 }
 
-
-__global__ void ComputePressure_gpu(double* ux_, double* uy_, double* pressure,double* pressure_next ,int nw_, int nh_) 
+__global__ void ComputePressure_gpu(double* ux_, double* uy_, double* pressure, double* pressure_next, int nw_, int nh_)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -221,10 +211,10 @@ __global__ void ComputePressure_gpu(double* ux_, double* uy_, double* pressure,d
 	double diverg = 0.0f;
 	double uxpre = Safe_fetch(ux_, x - 1, y, nw_, nh_);
 	double uxnext = Safe_fetch(ux_, x + 1, y, nw_, nh_);
-	double uypre = Safe_fetch(uy_, x , y-1, nw_, nh_);
-	double uynext = Safe_fetch(uy_, x , y+1, nw_, nh_);
+	double uypre = Safe_fetch(uy_, x, y - 1, nw_, nh_);
+	double uynext = Safe_fetch(uy_, x, y + 1, nw_, nh_);
 	diverg = -0.5f * (uxnext - uxpre + uynext - uypre);
-	
+
 	//G-S and R-B
 	if ((x + y) % 2 == 0)
 	{
@@ -253,31 +243,31 @@ __global__ void ComputePressure_gpu(double* ux_, double* uy_, double* pressure,d
 	//pressure_next[IX(x, y, nw_)] = (diverg + pressurex_pre + pressurex_next + pressurey_next + pressurey_pre) / 4.0f;
 }
 
-__global__ void Projection_gpu(double* ux_, double* uy_, double* pressure, int nw_, int nh_) 
+__global__ void Projection_gpu(double* ux_, double* uy_, double* pressure, int nw_, int nh_)
 {
 
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
-	
+
 	double pressurex_pre = Safe_fetch(pressure, x - 1, y, nw_, nh_);
 	double pressurex_next = Safe_fetch(pressure, x + 1, y, nw_, nh_);
-	double pressurey_pre = Safe_fetch(pressure, x , y-1, nw_, nh_);
-	double pressurey_next = Safe_fetch(pressure, x, y+1, nw_, nh_);
+	double pressurey_pre = Safe_fetch(pressure, x, y - 1, nw_, nh_);
+	double pressurey_next = Safe_fetch(pressure, x, y + 1, nw_, nh_);
 
-	ux_[IX(x, y,nw_)] -= 0.5f * (pressurex_next - pressurex_pre);
-	uy_[IX(x, y,nw_)] -= 0.5f * (pressurey_next - pressurey_pre);
+	ux_[IX(x, y, nw_)] -= 0.5f * (pressurex_next - pressurex_pre);
+	uy_[IX(x, y, nw_)] -= 0.5f * (pressurey_next - pressurey_pre);
 
 }
 
 
 
-__global__ void Advect_gpu_u(double* ux_, double* uy_, double* ux_next, double* uy_next, double* ux_half,double* uy_half ,double timestep, int nw_, int nh_)
+__global__ void Advect_gpu_u(double* ux_, double* uy_, double* ux_next, double* uy_next, double* ux_half, double* uy_half, double timestep, int nw_, int nh_)
 {
 
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
-	if (x >= nw_ || y>=nh_) return;
+	if (x >= nw_ || y >= nh_) return;
 	//TODO need check!
 	//if (x < 1 || x > nw_ - 2)
 	//{
@@ -312,7 +302,7 @@ __global__ void Advect_gpu_u(double* ux_, double* uy_, double* ux_next, double* 
 
 
 //For advanced part need reflection
-__global__ void Refelect_gpu_u(double* ux_, double* uy_, double* ux_half, double* uy_half,double timestep, int nw_, int nh_)
+__global__ void Refelect_gpu_u(double* ux_, double* uy_, double* ux_half, double* uy_half, double timestep, int nw_, int nh_)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -352,7 +342,7 @@ __global__ void InletJetflow_gpu(double* ux_, double* density_, double t, int nw
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= 0 && x < 6 && y >= nh_ / 2 - 4 + offset && y < nh_ / 2 + 4 + offset)
 	{
-		//ux_[IX(x, y, nw_)] += t;
+		//ux_[IX(x, y, nw_)] = t;
 		//density_[IX(x, y, nw_)] = 1;
 		//return;
 	}
@@ -371,7 +361,7 @@ __global__ void Check_gpu(double* density_, double* density_next, double* ux_, d
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
 
-	if (x < 6||y<6)
+	if (x < 6 || y < 6)
 	{
 		density_[IX(x, y, nw_)] = 1;
 		return;
@@ -393,7 +383,7 @@ unsigned idx(unsigned x, unsigned y, unsigned nw_)
 
 void AdvanceTime_cpu(double* oldarray, double* newarray, int nw_, int nh_)
 {
-	for (size_t i = 0; i < nw_*nh_; i++)
+	for (size_t i = 0; i < nw_ * nh_; i++)
 	{
 		oldarray[i] = newarray[i];
 	}
@@ -441,31 +431,31 @@ void diffuse_cpu(double* ux_, double* ux_next, double viscosity, int nw_, int nh
 	//ux_next[IX(x, y, nw_)] = (ux_[IX(x, y, nw_)] + viscosity * (ux_next[IX(x - 1, y, nw_)] + ux_next[IX(x + 1, y, nw_)] + ux_next[IX(x, y - 1, nw_)] + ux_next[IX(x, y + 1, nw_)])) / (1.0f + 4.0f * viscosity);
 }
 
-void advect_u_cpu(double* ux_,double* uy_ ,double* ux_next, double* uy_next,double timestep, int nw_, int nh_)
+void advect_u_cpu(double* ux_, double* uy_, double* ux_next, double* uy_next, double timestep, int nw_, int nh_)
 {
 
-	
-		for (auto y = 1; y < nh_ - 1; y++)
+
+	for (auto y = 1; y < nh_ - 1; y++)
+	{
+		for (auto x = 1; x < nw_ - 1; x++)
 		{
-			for (auto x = 1; x < nw_ - 1; x++)
-			{
-				double xPosPrev = x - timestep * ux_[idx(x, y, nw_)];
-				double yPosPrev = y - timestep * uy_[idx(x, y, nw_)];
-				xPosPrev = Clamp_cpu(xPosPrev, 0.0f, double(nw_));
-				yPosPrev = Clamp_cpu(yPosPrev, 0.0f, double(nh_));
-				//may be not ux_??
-				double ux_advected = Interpolation_cpu(xPosPrev, yPosPrev, ux_, nw_);
-				double uy_advected = Interpolation_cpu(xPosPrev, yPosPrev, uy_, nw_);
-				//test interpolatation	 
-				//add to ux uy
-				ux_next[idx(x, y, nw_)] = ux_advected;
-				uy_next[idx(x, y, nw_)] = uy_advected;
-			}
+			double xPosPrev = x - timestep * ux_[idx(x, y, nw_)];
+			double yPosPrev = y - timestep * uy_[idx(x, y, nw_)];
+			xPosPrev = Clamp_cpu(xPosPrev, 0.0f, double(nw_));
+			yPosPrev = Clamp_cpu(yPosPrev, 0.0f, double(nh_));
+			//may be not ux_??
+			double ux_advected = Interpolation_cpu(xPosPrev, yPosPrev, ux_, nw_);
+			double uy_advected = Interpolation_cpu(xPosPrev, yPosPrev, uy_, nw_);
+			//test interpolatation	 
+			//add to ux uy
+			ux_next[idx(x, y, nw_)] = ux_advected;
+			uy_next[idx(x, y, nw_)] = uy_advected;
 		}
+	}
 
 }
 
-void advect_density_cpu(double* ux_, double* uy_, double* density_, double* density_next, double timestep , int nw_, int nh_)
+void advect_density_cpu(double* ux_, double* uy_, double* density_, double* density_next, double timestep, int nw_, int nh_)
 {
 
 
@@ -490,67 +480,67 @@ void advect_density_cpu(double* ux_, double* uy_, double* density_, double* dens
 
 int main(int argc, char* argv[])
 {
-    GLFWwindow* window;
-    unsigned width = 1000;
-    unsigned height =1000 ;
+	GLFWwindow* window;
+	unsigned width = 1000;
+	unsigned height = 1000;
 	float totalTime = 0.0f;
 	int loopTImes = 0;
-    // Window setups
-    {
-        if (!glfwInit()) // Initialize glfw library
-            return -1;
+	// Window setups
+	{
+		if (!glfwInit()) // Initialize glfw library
+			return -1;
 
-        // setting glfw window hints and global configurations
-        {
-            glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-            glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-            glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); // Use Core Mode
-            // glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE); // Use Debug Context
-        #ifdef __APPLE__
-            glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); // uncomment this statement to fix compilation on OS X
-        #endif
-        }
+		// setting glfw window hints and global configurations
+		{
+			glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+			glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+			glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); // Use Core Mode
+			// glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE); // Use Debug Context
+#ifdef __APPLE__
+			glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); // uncomment this statement to fix compilation on OS X
+#endif
+		}
 
-        // Create a windowed mode window and its OpenGL context
-        window = glfwCreateWindow(width, height, "Stable Fluids Simulation", NULL, NULL);
-        if (!window) {
-            glfwTerminate();
-            return -1;
-        }
+		// Create a windowed mode window and its OpenGL context
+		window = glfwCreateWindow(width, height, "Stable Fluids Simulation", NULL, NULL);
+		if (!window) {
+			glfwTerminate();
+			return -1;
+		}
 
-        // window configurations
-        {
-            // glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-            // glfwSetInputMode(window, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
-        }
+		// window configurations
+		{
+			// glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+			// glfwSetInputMode(window, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
+		}
 
-        // Make the window's context current
-        glfwMakeContextCurrent(window);
+		// Make the window's context current
+		glfwMakeContextCurrent(window);
 
-        // Load Opengl
-        if (!gladLoadGL()) {
-            glfwTerminate();
-            return -1;
-        };
+		// Load Opengl
+		if (!gladLoadGL()) {
+			glfwTerminate();
+			return -1;
+		};
 
-        // On Window Resized
-        glfwSetFramebufferSizeCallback(window,
-            [](GLFWwindow*, int _w, int _h) {
-                glViewport(0, 0, _w, _h);
-            }
-        );
-    }
+		// On Window Resized
+		glfwSetFramebufferSizeCallback(window,
+			[](GLFWwindow*, int _w, int _h) {
+				glViewport(0, 0, _w, _h);
+			}
+		);
+	}
 
-    // Main Loop
-    {
-        Shader shader("fluid.vs", "fluid.fs");
+	// Main Loop
+	{
+		Shader shader("fluid.vs", "fluid.fs");
 
 		//Set the resolution
-        FluidScene fluid {1000, 1000};
-        FluidVisualizer renderer {&shader, &fluid};
+		FluidScene fluid{ 1000, 1000 };
+		FluidVisualizer renderer{ &shader, &fluid };
 
-        int curKeyState = GLFW_RELEASE;
-        int lastKeyState = GLFW_RELEASE;
+		int curKeyState = GLFW_RELEASE;
+		int lastKeyState = GLFW_RELEASE;
 
 		FluidData* GPU_Data = fluid.simulator_GPU->GPU_Data;
 		FluidData* CPU_Data = fluid.simulator_GPU->CPU_Data;
@@ -560,49 +550,51 @@ int main(int argc, char* argv[])
 		dim3 grid((nw - 1) / blks.x + 1, (nh - 1) / blks.y + 1);
 		cudaError_t cudaStatus;
 		int iterTime = 40;
+
 		bool move_once = false;
+		double* tmp;
 
-        // Loop until the user closes the window
-        while (!glfwWindowShouldClose(window))
-        {
-            // Terminate condition
-            if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-                glfwSetWindowShouldClose(window, true);
+		// Loop until the user closes the window
+		while (!glfwWindowShouldClose(window))
+		{
+			// Terminate condition
+			if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+				glfwSetWindowShouldClose(window, true);
 
-            processMouseInput(window, &fluid);
-			            // Updating
-            {
-                lastKeyState = curKeyState;
-                curKeyState = glfwGetKey(window, GLFW_KEY_P);
-                // Uncomment to debug update step by step
-               // if(curKeyState == GLFW_PRESS && lastKeyState == GLFW_RELEASE)
-                if (curKeyState == GLFW_PRESS)
-                {
+			processMouseInput(window, &fluid);
+			// Updating
+			{
+				lastKeyState = curKeyState;
+				curKeyState = glfwGetKey(window, GLFW_KEY_P);
+				// Uncomment to debug update step by step
+			   // if(curKeyState == GLFW_PRESS && lastKeyState == GLFW_RELEASE)
+				if (curKeyState == GLFW_PRESS)
+				{
 					auto start = std::chrono::high_resolution_clock::now();
-					#pragma region CPU Main Loop
+#pragma region CPU Main Loop
 					//fluid.step();
-										// 
-										// CPU CHECK
-										//fluid.simulator_GPU->InletJetflow(CPU_Data,1);
-										//advect_u_cpu(CPU_Data->ux_, CPU_Data->uy_, CPU_Data->ux_next ,CPU_Data->uy_next, fluid.simulator_GPU->timeStep,nw, nh);
-										//AdvanceTime_cpu(CPU_Data->ux_, CPU_Data->ux_next, nw, nh);
-										//AdvanceTime_cpu(CPU_Data->uy_, CPU_Data->uy_next, nw, nh);
+					// 
+					// CPU CHECK
+					//fluid.simulator_GPU->InletJetflow(CPU_Data,1);
+					//advect_u_cpu(CPU_Data->ux_, CPU_Data->uy_, CPU_Data->ux_next ,CPU_Data->uy_next, fluid.simulator_GPU->timeStep,nw, nh);
+					//AdvanceTime_cpu(CPU_Data->ux_, CPU_Data->ux_next, nw, nh);
+					//AdvanceTime_cpu(CPU_Data->uy_, CPU_Data->uy_next, nw, nh);
 
 
-										//diffuse_cpu(CPU_Data->ux_, CPU_Data->ux_next, fluid.simulator_GPU->viscosity, nw, nh);
-										//diffuse_cpu(CPU_Data->uy_, CPU_Data->uy_next, fluid.simulator_GPU->viscosity, nw, nh);
-										//AdvanceTime_cpu(CPU_Data->ux_, CPU_Data->ux_next, nw, nh);
-										//AdvanceTime_cpu(CPU_Data->uy_, CPU_Data->uy_next, nw, nh);
+					//diffuse_cpu(CPU_Data->ux_, CPU_Data->ux_next, fluid.simulator_GPU->viscosity, nw, nh);
+					//diffuse_cpu(CPU_Data->uy_, CPU_Data->uy_next, fluid.simulator_GPU->viscosity, nw, nh);
+					//AdvanceTime_cpu(CPU_Data->ux_, CPU_Data->ux_next, nw, nh);
+					//AdvanceTime_cpu(CPU_Data->uy_, CPU_Data->uy_next, nw, nh);
 
-										//advect_density_cpu(CPU_Data->ux_, CPU_Data->uy_, CPU_Data->density_, CPU_Data->density_next, fluid.simulator_GPU->timeStep, nw, nh);
-										//AdvanceTime_cpu(CPU_Data->density_, CPU_Data->density_next, nw, nh);
+					//advect_density_cpu(CPU_Data->ux_, CPU_Data->uy_, CPU_Data->density_, CPU_Data->density_next, fluid.simulator_GPU->timeStep, nw, nh);
+					//AdvanceTime_cpu(CPU_Data->density_, CPU_Data->density_next, nw, nh);
 
-										//diffuse_cpu(CPU_Data->density_, CPU_Data->density_next, fluid.simulator_GPU->diffk,nw, nh);
-										//AdvanceTime_cpu(CPU_Data->density_, CPU_Data->density_next, nw, nh);
+					//diffuse_cpu(CPU_Data->density_, CPU_Data->density_next, fluid.simulator_GPU->diffk,nw, nh);
+					//AdvanceTime_cpu(CPU_Data->density_, CPU_Data->density_next, nw, nh);
 #pragma endregion
 
-                    
-					
+
+
 
 					//GPU flow inject
 					if (move_once == false)
@@ -611,26 +603,33 @@ int main(int argc, char* argv[])
 						move_once = true;
 					}
 					InletJetflow_gpu << <blks, grid >> > (GPU_Data->ux_, GPU_Data->density_, 1, nw, nh, 5);
-                   
 
 
 
 
 
-			
+
+
 					//diffuse u
 					for (size_t i = 0; i < iterTime; i++)
 					{
-						diffuse_gpu <<<blks,grid >>> (GPU_Data->ux_, GPU_Data->ux_next, fluid.simulator_GPU->viscosity, nw, nh);
+						diffuse_gpu << <blks, grid >> > (GPU_Data->ux_, GPU_Data->ux_next, fluid.simulator_GPU->viscosity, nw, nh);
 						cudaDeviceSynchronize();
-						diffuse_gpu <<<blks,grid >>> (GPU_Data->uy_, GPU_Data->uy_next, fluid.simulator_GPU->viscosity, nw, nh);			
+						diffuse_gpu << <blks, grid >> > (GPU_Data->uy_, GPU_Data->uy_next, fluid.simulator_GPU->viscosity, nw, nh);
 						cudaDeviceSynchronize();
-						AdvanceTime << <blks, grid >> > (GPU_Data->ux_, GPU_Data->ux_next, nw, nh);
-						cudaDeviceSynchronize();
-						AdvanceTime << <blks, grid >> > (GPU_Data->uy_, GPU_Data->uy_next, nw, nh);
-						cudaDeviceSynchronize();
+						//AdvanceTime << <blks, grid >> > (GPU_Data->ux_, GPU_Data->ux_next, nw, nh);
+						//cudaDeviceSynchronize();
+						//AdvanceTime << <blks, grid >> > (GPU_Data->uy_, GPU_Data->uy_next, nw, nh);
+						//cudaDeviceSynchronize();
+
+						tmp = GPU_Data->ux_;
+						GPU_Data->ux_ = GPU_Data->ux_next;
+						GPU_Data->ux_next = tmp;
+						tmp = GPU_Data->uy_;
+						GPU_Data->uy_ = GPU_Data->uy_next;
+						GPU_Data->uy_next = tmp;
 					}
-				
+
 					//project u
 					SetValue << <blks, grid >> > (GPU_Data->pressure, 0.0f, nw, nh);
 					SetValue << <blks, grid >> > (GPU_Data->pressure_next, 0.0f, nw, nh);
@@ -639,8 +638,12 @@ int main(int argc, char* argv[])
 					{
 						ComputePressure_gpu << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
 						cudaDeviceSynchronize();
-						AdvanceTime << <blks, grid >> > (GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
-						cudaDeviceSynchronize();
+						//AdvanceTime << <blks, grid >> > (GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
+						//cudaDeviceSynchronize();
+						
+						tmp = GPU_Data->pressure;
+						GPU_Data->pressure = GPU_Data->pressure_next;
+						GPU_Data->pressure_next = tmp;
 					}
 					Projection_gpu << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
 					cudaDeviceSynchronize();
@@ -649,26 +652,37 @@ int main(int argc, char* argv[])
 					//advect u
 					Advect_gpu_u << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_next, GPU_Data->uy_next, GPU_Data->ux_half, GPU_Data->uy_half, fluid.simulator_GPU->timeStep, nw, nh);
 					cudaDeviceSynchronize();
-					AdvanceTime << <blks, grid >> > (GPU_Data->ux_, GPU_Data->ux_next, nw, nh);
+					/*AdvanceTime << <blks, grid >> > (GPU_Data->ux_, GPU_Data->ux_next, nw, nh);
 					cudaDeviceSynchronize();
 					AdvanceTime << <blks, grid >> > (GPU_Data->uy_, GPU_Data->uy_next, nw, nh);
-					cudaDeviceSynchronize();
+					cudaDeviceSynchronize();*/
+					tmp = GPU_Data->ux_;
+					GPU_Data->ux_ = GPU_Data->ux_next;
+					GPU_Data->ux_next = tmp;
+					tmp = GPU_Data->uy_;
+					GPU_Data->uy_ = GPU_Data->uy_next;
+					GPU_Data->uy_next = tmp;
+
 
 					//project u
-					SetValue << <blks,grid >> > (GPU_Data->pressure, 0.0f, nw, nh);
+					SetValue << <blks, grid >> > (GPU_Data->pressure, 0.0f, nw, nh);
 					SetValue << <blks, grid >> > (GPU_Data->pressure_next, 0.0f, nw, nh);
 					cudaDeviceSynchronize();
 					for (size_t i = 0; i < iterTime; i++)
 					{
-						ComputePressure_gpu << <blks,grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next,nw, nh);
+						ComputePressure_gpu << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
 						cudaDeviceSynchronize();
-						AdvanceTime << <blks, grid >> > (GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
-						cudaDeviceSynchronize();
+						//AdvanceTime << <blks, grid >> > (GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
+						//cudaDeviceSynchronize();
+
+						tmp = GPU_Data->pressure;
+						GPU_Data->pressure = GPU_Data->pressure_next;
+						GPU_Data->pressure_next = tmp;
 					}
 					Projection_gpu << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, nw, nh);
 					cudaDeviceSynchronize();
 
-				
+
 
 #pragma region Advanced part advection-reflection
 					////reflect
@@ -712,23 +726,30 @@ int main(int argc, char* argv[])
 #pragma endregion
 
 
-					
+
 
 
 					//advect density
-                    Advect_gpu_density <<<blks,grid>>> (GPU_Data->density_, GPU_Data->density_next, GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_next, GPU_Data->uy_next, fluid.simulator_GPU->timeStep, nw, nh);
+					Advect_gpu_density << <blks, grid >> > (GPU_Data->density_, GPU_Data->density_next, GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_next, GPU_Data->uy_next, fluid.simulator_GPU->timeStep, nw, nh);
 					cudaDeviceSynchronize();
-                    AdvanceTime << <blks,grid >> > (GPU_Data->density_, GPU_Data->density_next,nw,nh);
-					cudaDeviceSynchronize();
+					/*AdvanceTime << <blks, grid >> > (GPU_Data->density_, GPU_Data->density_next, nw, nh);
+					cudaDeviceSynchronize();*/
+					tmp = GPU_Data->density_;
+					GPU_Data->density_ = GPU_Data->density_next;
+					GPU_Data->density_next = tmp;
+					
 					//diffuse density
 					for (size_t i = 0; i < iterTime; i++)
 					{
 						diffuse_gpu << <blks, grid >> > (GPU_Data->density_, GPU_Data->density_next, fluid.simulator_GPU->diffk, nw, nh);
 						cudaDeviceSynchronize();
-						AdvanceTime << <blks, grid >> > (GPU_Data->density_, GPU_Data->density_next, nw, nh);
-						cudaDeviceSynchronize();
+						//AdvanceTime << <blks, grid >> > (GPU_Data->density_, GPU_Data->density_next, nw, nh);
+						//cudaDeviceSynchronize();
+						tmp = GPU_Data->density_;
+						GPU_Data->density_ = GPU_Data->density_next;
+						GPU_Data->density_next = tmp;
 					}
-				
+
 
 
 
@@ -748,82 +769,83 @@ int main(int argc, char* argv[])
 					if (cudaStatus != cudaSuccess) {
 						fprintf(stderr, "Kernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
 					}
-                }
-            }
+				}
+			}
 
-            glClear(GL_COLOR_BUFFER_BIT);
+			glClear(GL_COLOR_BUFFER_BIT);
 
-            // Draw here
-            {
-                renderer.draw();
-            }
+			// Draw here
+			{
+				renderer.draw();
+			}
 
-            // Swap front and back buffers
-            glfwSwapBuffers(window);
+			// Swap front and back buffers
+			glfwSwapBuffers(window);
 
-            // Poll for and process events
-            glfwPollEvents();
-        }
-    }
+			// Poll for and process events
+			glfwPollEvents();
+		}
+	}
 
-    glfwTerminate();
-	std::cout << "Execution time: " << totalTime/loopTImes << " microseconds" << std::endl;
-    return 0;
+	glfwTerminate();
+	std::cout << "Execution time: " << totalTime / loopTImes << " microseconds" << std::endl;
+	return 0;
 }
 
 
 void processMouseInput(GLFWwindow* window, FluidScene* fluid)
 {
-    static bool firstRun {true};
-    static double lastCursorX {0};
-    static double lastCursorY {0};
-    static int lastLeftButtonState {GLFW_RELEASE};
-    static int lastRightButtonState {GLFW_RELEASE};
+	static bool firstRun{ true };
+	static double lastCursorX{ 0 };
+	static double lastCursorY{ 0 };
+	static int lastLeftButtonState{ GLFW_RELEASE };
+	static int lastRightButtonState{ GLFW_RELEASE };
 
-    double curCursorX, curCursorY;
-    int curLeftButtonState = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
-    int curRightButtonState = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
+	double curCursorX, curCursorY;
+	int curLeftButtonState = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
+	int curRightButtonState = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
 
-    glfwGetCursorPos(window, &curCursorX, &curCursorY);
-    if (firstRun) {
-        firstRun = false;
-        lastCursorX = static_cast<double>(curCursorX);
-        lastCursorY = static_cast<double>(curCursorY);
-        return; // everything zero, so we return directly
-    }
+	glfwGetCursorPos(window, &curCursorX, &curCursorY);
+	if (firstRun) {
+		firstRun = false;
+		lastCursorX = static_cast<double>(curCursorX);
+		lastCursorY = static_cast<double>(curCursorY);
+		return; // everything zero, so we return directly
+	}
 
-    if (curLeftButtonState == GLFW_PRESS || curRightButtonState == GLFW_PRESS) {
-        int width, height;
-        glfwGetWindowSize(window, &width, &height);
+	if (curLeftButtonState == GLFW_PRESS || curRightButtonState == GLFW_PRESS) {
+		int width, height;
+		glfwGetWindowSize(window, &width, &height);
 
-        double deltaCursorX = (curCursorX - lastCursorX) / double(width);
-        double deltaCursorY = (curCursorY - lastCursorY) / double(height);
+		double deltaCursorX = (curCursorX - lastCursorX) / double(width);
+		double deltaCursorY = (curCursorY - lastCursorY) / double(height);
 
-        // map from screen to fluid space
-        glm::vec2 applyPos = {
-            curCursorX / width * fluid->width,
-            (1.0 - curCursorY / height) * fluid->height
-        };
+		// map from screen to fluid space
+		glm::vec2 applyPos = {
+			curCursorX / width * fluid->width,
+			(1.0 - curCursorY / height) * fluid->height
+		};
 
-        if (curLeftButtonState == GLFW_PRESS) {
-            // Click to apply delta velocity
-            glm::vec2 applyVel = {deltaCursorX * 100.0f, -deltaCursorY * 100.0f};
-            fluid->applyImpulsiveVelocity(applyPos, applyVel);
+		if (curLeftButtonState == GLFW_PRESS) {
+			// Click to apply delta velocity
+			glm::vec2 applyVel = { deltaCursorX * 100.0f, -deltaCursorY * 100.0f };
+			fluid->applyImpulsiveVelocity(applyPos, applyVel);
 
-            std::cout << "Apply ("<< applyPos.x << ", " << applyPos.y << "): (" << applyVel.x << ", " << applyVel.y << ")" << std::endl;
+			std::cout << "Apply (" << applyPos.x << ", " << applyPos.y << "): (" << applyVel.x << ", " << applyVel.y << ")" << std::endl;
 
-        } else if (lastRightButtonState == GLFW_RELEASE) {
-            // Click to read data for debugging..?
-            glm::vec2 vel = fluid->getVelocity(applyPos.x, applyPos.y); // interpolateVelocityAt(applyPos);
-            double dens = fluid->getDensity(applyPos.x, applyPos.y); // interpolateDensityAt(applyPos);
+		}
+		else if (lastRightButtonState == GLFW_RELEASE) {
+			// Click to read data for debugging..?
+			glm::vec2 vel = fluid->getVelocity(applyPos.x, applyPos.y); // interpolateVelocityAt(applyPos);
+			double dens = fluid->getDensity(applyPos.x, applyPos.y); // interpolateDensityAt(applyPos);
 
-            std::cout << "Read ("<< applyPos.x << ", " << applyPos.y << "): (" << vel.x << ", " << vel.y << ") " << dens << std::endl;
-        }
-    }
+			std::cout << "Read (" << applyPos.x << ", " << applyPos.y << "): (" << vel.x << ", " << vel.y << ") " << dens << std::endl;
+		}
+	}
 
-    // update record
-    lastCursorX = static_cast<double>(curCursorX);
-    lastCursorY = static_cast<double>(curCursorY);
-    lastLeftButtonState = curLeftButtonState;
-    lastRightButtonState = curRightButtonState;
+	// update record
+	lastCursorX = static_cast<double>(curCursorX);
+	lastCursorY = static_cast<double>(curCursorY);
+	lastLeftButtonState = curLeftButtonState;
+	lastRightButtonState = curRightButtonState;
 }

@@ -3,3 +3,4 @@ Stable_fluids.vcxproj
 Stable_fluids.vcxproj.user
 kernel.cu
 simulator_kernel.cu
+/Stable_fluids/PropertySheet.props
