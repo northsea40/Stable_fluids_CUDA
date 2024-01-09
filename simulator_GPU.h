@@ -47,8 +47,8 @@ public:
 	const int m_num;
 	double timeStep=1;
 	double dx = 1.0f;
-	double viscosity = 0.0001;
-	double diffk = 0.0001;
+	double viscosity = 0.00001;
+	double diffk = 0.00001;
 	FluidData* CPU_Data;
 	FluidData* GPU_Data;
 	//const int NUM_THREADS;

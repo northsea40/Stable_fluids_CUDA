@@ -111,9 +111,15 @@ __device__ double Safe_fetch(double* u, int x, int y, int nw_, int nh_)
 {
 	double safeIndex_x = Clamp(x, 0, nw_-1);
 	double safeIndex_y = Clamp(y, 0, nh_-1);
-	return u[IX(safeIndex_x, safeIndex_y, nw_)];
+	return -u[IX(safeIndex_x, safeIndex_y, nw_)];
 }
 
+__device__ double Safe_fetch_pressure(double* u, int x, int y, int nw_, int nh_)
+{
+	double safeIndex_x = Clamp(x, 0, nw_ - 1);
+	double safeIndex_y = Clamp(y, 0, nh_ - 1);
+	return u[IX(safeIndex_x, safeIndex_y, nw_)];
+}
 
 __device__ double Safe_fetch_shared(double* u_local,double* u_global ,int x_local, int y_local,int x_global,int y_global,int n_local, int n_global)
 {
@@ -406,15 +412,15 @@ __global__ void ComputePressure_gpu_border(double* ux_, double* uy_, double* pre
 	if (x >= nw_ || y >= nh_) return;
 	if (x > 0 || x < nw_ - 1 || y>0 || y < nh_ - 1) return;
 	double diverg = 0.0f;
-	double uxpre = Safe_fetch(ux_, x - 1, y, nw_, nh_);
-	double uxnext = Safe_fetch(ux_, x + 1, y, nw_, nh_);
-	double uypre = Safe_fetch(uy_, x, y - 1, nw_, nh_);
-	double uynext = Safe_fetch(uy_, x, y + 1, nw_, nh_);
+	double uxpre = Safe_fetch_pressure(ux_, x - 1, y, nw_, nh_);
+	double uxnext = Safe_fetch_pressure(ux_, x + 1, y, nw_, nh_);
+	double uypre = Safe_fetch_pressure(uy_, x, y - 1, nw_, nh_);
+	double uynext = Safe_fetch_pressure(uy_, x, y + 1, nw_, nh_);
 	diverg = -0.5f * (uxnext - uxpre + uynext - uypre);
-	double pressurex_pre = Safe_fetch(pressure_next, x - 1, y, nw_, nh_);
-	double pressurex_next = Safe_fetch(pressure_next, x + 1, y, nw_, nh_);
-	double pressurey_pre = Safe_fetch(pressure_next, x, y + 1, nw_, nh_);
-	double pressurey_next = Safe_fetch(pressure_next, x, y - 1, nw_, nh_);
+	double pressurex_pre = Safe_fetch_pressure(pressure_next, x - 1, y, nw_, nh_);
+	double pressurex_next = Safe_fetch_pressure(pressure_next, x + 1, y, nw_, nh_);
+	double pressurey_pre = Safe_fetch_pressure(pressure_next, x, y + 1, nw_, nh_);
+	double pressurey_next = Safe_fetch_pressure(pressure_next, x, y - 1, nw_, nh_);
 	pressure_next[IX(x, y, nw_)] = (diverg + pressurex_pre + pressurex_next + pressurey_next + pressurey_pre) / 4.0f;
 }
 
@@ -558,18 +564,12 @@ __global__ void Advect_gpu_u(double* ux_, double* uy_, double* ux_next, double* 
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y>=nh_) return;
 	//TODO need check!
-	//if (x < 1 || x > nw_ - 2)
-	//{
-	//	Set_boundary(ux_next, x, y, nw_, nh_);
-	//	Set_boundary(uy_next, x, y, nw_, nh_);
-	//	return;
-	//}
-	//if (y < 1 || y > nh_ - 2)
-	//{
-	//	Set_boundary(ux_next, x, y, nw_, nh_);
-	//	Set_boundary(uy_next, x, y, nw_, nh_);
-	//	return;
-	//}
+	/*if (x < 1 || x > nw_ - 2||y < 1 || y > nh_ - 2)
+	{
+		Set_boundary(ux_next, x, y, nw_, nh_);
+		Set_boundary(uy_next, x, y, nw_, nh_);
+		return;
+	}*/
 	double xPosPrev = x - timestep * ux_[IX(x, y, nw_)];
 	double yPosPrev = y - timestep * uy_[IX(x, y, nw_)];
 
@@ -611,11 +611,11 @@ __global__ void Advect_gpu_density(double* density_, double* density_next, doubl
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x >= nw_ || y >= nh_) return;
 
-	//if (x < 1 || x > nw_ - 2 || y < 1 || y > nh_ - 2)
-	//{
-	//	Set_boundary(density_next, x, y, nw_, nh_);
-	//	return;
-	//}
+	/*if (x < 1 || x > nw_ - 2 || y < 1 || y > nh_ - 2)
+	{
+		Set_boundary(density_next, x, y, nw_, nh_);
+		return;
+	}*/
 
 	double xPosPrev = x - timestep * ux_[IX(x, y, nw_)];
 	double yPosPrev = y - timestep * uy_[IX(x, y, nw_)];
@@ -851,7 +851,7 @@ int main(int argc, char* argv[])
         Shader shader("fluid.vs", "fluid.fs");
 
 		//Set the resolution
-        FluidScene fluid {1000, 1000};
+        FluidScene fluid {800, 800};
         FluidVisualizer renderer {&shader, &fluid};
 
         int curKeyState = GLFW_RELEASE;
@@ -947,6 +947,7 @@ int main(int argc, char* argv[])
 						diffuse_gpu_border << <blks, grid >> > (GPU_Data->ux_, GPU_Data->ux_next, fluid.simulator_GPU->viscosity, nw, nh);
 						diffuse_gpu_inner << <blks_inner, grid_inner >> > (GPU_Data->uy_, GPU_Data->uy_next, fluid.simulator_GPU->viscosity, nw, nh);
 						diffuse_gpu_border << <blks, grid >> > (GPU_Data->uy_, GPU_Data->uy_next, fluid.simulator_GPU->viscosity, nw, nh);
+						cudaDeviceSynchronize();
 						Swap_buffer(GPU_Data->ux_, GPU_Data->ux_next);
 						Swap_buffer(GPU_Data->uy_, GPU_Data->uy_next);
 					}
@@ -959,11 +960,11 @@ int main(int argc, char* argv[])
 					{
 						//ComputePressure_gpu << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
 						ComputePressure_gpu_inner << <blks_inner, grid_inner >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
-						//ComputePressure_gpu_border << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
-						ComputePressure_gpu_border_u << <blks_border, grid_border >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
-						ComputePressure_gpu_border_r << <blks_border, grid_border >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
-						ComputePressure_gpu_border_l << <blks_border, grid_border >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
-						ComputePressure_gpu_border_d << <blks_border, grid_border >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
+						ComputePressure_gpu_border << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
+						//ComputePressure_gpu_border_u << <blks_border, grid_border >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
+						//ComputePressure_gpu_border_r << <blks_border, grid_border >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
+						//ComputePressure_gpu_border_l << <blks_border, grid_border >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
+						//ComputePressure_gpu_border_d << <blks_border, grid_border >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
 
 						cudaDeviceSynchronize();
 						
@@ -978,8 +979,8 @@ int main(int argc, char* argv[])
 					//advect u
 					Advect_gpu_u << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->ux_next, GPU_Data->uy_next, GPU_Data->ux_half, GPU_Data->uy_half, fluid.simulator_GPU->timeStep, nw, nh);
 					cudaDeviceSynchronize();
-	Swap_buffer(GPU_Data->ux_, GPU_Data->ux_next);
-						Swap_buffer(GPU_Data->uy_, GPU_Data->uy_next);
+					Swap_buffer(GPU_Data->ux_, GPU_Data->ux_next);
+					Swap_buffer(GPU_Data->uy_, GPU_Data->uy_next);
 
 					//project u
 					SetValue << <blks,grid >> > (GPU_Data->pressure, 0.0f, nw, nh);
@@ -988,10 +989,11 @@ int main(int argc, char* argv[])
 					for (size_t i = 0; i < iterTime; i++)
 					{
 						ComputePressure_gpu_inner << <blks_inner, grid_inner >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
-						ComputePressure_gpu_border_u << <blks_border, grid_border >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
+						ComputePressure_gpu_border << <blks, grid >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
+					/*	ComputePressure_gpu_border_u << <blks_border, grid_border >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
 						ComputePressure_gpu_border_r << <blks_border, grid_border >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
 						ComputePressure_gpu_border_l << <blks_border, grid_border >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
-						ComputePressure_gpu_border_d << <blks_border, grid_border >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);
+						ComputePressure_gpu_border_d << <blks_border, grid_border >> > (GPU_Data->ux_, GPU_Data->uy_, GPU_Data->pressure, GPU_Data->pressure_next, nw, nh);*/
 
 						cudaDeviceSynchronize();
 						Swap_buffer(GPU_Data->pressure, GPU_Data->pressure_next);
@@ -1053,6 +1055,7 @@ int main(int argc, char* argv[])
 					{
 						diffuse_gpu_inner << <blks_inner, grid_inner >> > (GPU_Data->density_, GPU_Data->density_next, fluid.simulator_GPU->viscosity, nw, nh);
 						diffuse_gpu_border << <blks, grid >> > (GPU_Data->density_, GPU_Data->density_next, fluid.simulator_GPU->viscosity, nw, nh);
+						cudaDeviceSynchronize();
 						Swap_buffer(GPU_Data->ux_, GPU_Data->ux_next);
 						Swap_buffer(GPU_Data->uy_, GPU_Data->uy_next);
 					}
