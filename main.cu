@@ -851,7 +851,7 @@ int main(int argc, char* argv[])
         Shader shader("fluid.vs", "fluid.fs");
 
 		//Set the resolution
-        FluidScene fluid {800, 800};
+        FluidScene fluid {1000, 1000};
         FluidVisualizer renderer {&shader, &fluid};
 
         int curKeyState = GLFW_RELEASE;
